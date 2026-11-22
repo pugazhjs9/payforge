@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import Depends, Header, Request
+from fastapi import Cookie, Depends, Header, Request
 
+from payforge.auth.sessions import SESSION_COOKIE, Session, get_session
 from payforge.db import SessionLocal
-from payforge.errors import AppError, Unauthorized
-from payforge.models import Merchant
+from payforge.errors import AppError, Forbidden, Unauthorized
+from payforge.models import Merchant, UserRole
 from payforge.services.payments import MerchantRef
 
 
@@ -42,3 +43,32 @@ async def dev_merchant(
 
 
 CurrentMerchant = Annotated[MerchantRef, Depends(dev_merchant)]
+
+
+async def optional_session(
+    pf_sid: Annotated[str | None, Cookie(alias=SESSION_COOKIE, include_in_schema=False)] = None,
+) -> Session | None:
+    """The dashboard session, if the browser sent a valid session cookie. Never rejects."""
+    return await get_session(pf_sid) if pf_sid else None
+
+
+async def require_session(
+    session: Annotated[Session | None, Depends(optional_session)],
+) -> Session:
+    if session is None:
+        raise Unauthorized("not_logged_in", "Log in first.")
+    return session
+
+
+CurrentSession = Annotated[Session, Depends(require_session)]
+
+
+def require_role(*roles: UserRole) -> object:
+    async def check(session: CurrentSession) -> Session:
+        if session.role not in roles:
+            raise Forbidden(
+                "insufficient_role", f"This needs one of these roles: {', '.join(roles)}."
+            )
+        return session
+
+    return Depends(check)

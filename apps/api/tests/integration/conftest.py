@@ -12,6 +12,7 @@ import uvicorn
 from sqlalchemy import text
 
 from payforge.db import engine
+from payforge.redis import redis
 from simbank.app import BankState
 from simbank.app import create_app as create_simbank
 
@@ -28,6 +29,11 @@ def migrated_db() -> None:
         check=True,
         capture_output=True,
     )
+
+
+@pytest.fixture(autouse=True)
+async def clean_redis() -> None:
+    await redis.flushdb()  # database 1: the test database
 
 
 @pytest.fixture(autouse=True)
