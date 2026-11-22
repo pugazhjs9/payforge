@@ -7,6 +7,20 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: payforge_test
+          MYSQL_USER: payforge
+          MYSQL_PASSWORD: payforge
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
@@ -16,4 +30,6 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy apps/api/src apps/simbank/src
+      # binary logging is on by default; allow the app user to create the ledger triggers
+      - run: mysql -h 127.0.0.1 -P 3307 -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1"
       - run: uv run pytest
