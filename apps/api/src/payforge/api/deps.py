@@ -1,15 +1,16 @@
 """Shared FastAPI dependencies."""
 
 import secrets
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Cookie, Depends, Header, Request
+from sqlalchemy import select
 
 from payforge.auth.sessions import SESSION_COOKIE, Session, get_session
 from payforge.config import settings
 from payforge.db import SessionLocal
 from payforge.errors import AppError, Forbidden, Unauthorized
-from payforge.models import Merchant, UserRole
+from payforge.models import Merchant, User, UserRole
 from payforge.services.payments import MerchantRef
 
 
@@ -65,9 +66,16 @@ async def require_session(
 CurrentSession = Annotated[Session, Depends(require_session)]
 
 
-def require_role(*roles: UserRole) -> object:
+def require_role(*roles: UserRole) -> Any:
+    """Checks the user's CURRENT role in the database, not the one cached in the session,
+    so a demoted or removed user loses access immediately."""
+
     async def check(session: CurrentSession) -> Session:
-        if session.role not in roles:
+        async with SessionLocal() as db:
+            role = await db.scalar(select(User.role).where(User.id == session.user_id))
+        if role is None:
+            raise Unauthorized("not_logged_in", "Log in first.")
+        if role not in roles:
             raise Forbidden(
                 "insufficient_role", f"This needs one of these roles: {', '.join(roles)}."
             )

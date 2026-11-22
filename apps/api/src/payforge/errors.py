@@ -64,6 +64,14 @@ class Conflict(AppError):
         super().__init__(409, code, message)
 
 
+class OAuthError(AppError):
+    """Errors from the OAuth token endpoint use the standard RFC 6749 format
+    ({"error": "invalid_client"}) instead of ours: when a standard exists, follow it."""
+
+    def __init__(self, status: int, error: str, description: str) -> None:
+        super().__init__(status, error, description)
+
+
 def error_payload(
     request_id: str, code: str, message: str, details: list[dict[str, str]] | None = None
 ) -> dict[str, Any]:
@@ -81,6 +89,13 @@ def _request_id(request: Request) -> str:
 async def _app_error(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):
         raise TypeError(exc)
+    if isinstance(exc, OAuthError):
+        headers = {"WWW-Authenticate": "Basic"} if exc.status == 401 else None
+        return JSONResponse(
+            {"error": exc.code, "error_description": exc.message},
+            status_code=exc.status,
+            headers=headers,
+        )
     return JSONResponse(
         error_payload(_request_id(request), exc.code, exc.message, exc.details),
         status_code=exc.status,
