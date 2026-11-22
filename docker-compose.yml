@@ -1,8 +1,12 @@
 services:
   mysql:
     image: mysql:8.4
-    # binary logging is on by default; this lets the app user create the ledger triggers
-    command: ["--log-bin-trust-function-creators=1"]
+    command:
+      # binary logging is on by default; this lets the app user create the ledger triggers
+      - --log-bin-trust-function-creators=1
+      # LOCAL DEVELOPMENT ONLY: flush the redo log about once a second instead of at every
+      # commit (much faster on Docker's virtual disk). Never use this for real money.
+      - --innodb-flush-log-at-trx-commit=2
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: payforge

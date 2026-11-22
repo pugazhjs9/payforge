@@ -38,7 +38,11 @@ async def clean_redis() -> None:
 
 @pytest.fixture(autouse=True)
 async def clean_db(migrated_db: None) -> None:
-    """Empty every table, then create two merchants."""
+    """Empty every table that has rows, then create two merchants.
+
+    DELETE, not TRUNCATE: in MySQL, TRUNCATE drops and recreates the table (slow DDL).
+    Only ledger_transfers is truncated, because its append-only trigger blocks DELETE.
+    """
     async with engine.begin() as conn:
         tables = (
             await conn.execute(
@@ -50,8 +54,11 @@ async def clean_db(migrated_db: None) -> None:
         ).scalars()
         await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
         for table in list(tables):
-            # TRUNCATE (not DELETE) also bypasses the append-only ledger trigger
-            await conn.execute(text(f"TRUNCATE TABLE `{table}`"))
+            has_rows = await conn.scalar(text(f"SELECT EXISTS (SELECT 1 FROM `{table}`)"))
+            if not has_rows:
+                continue
+            verb = "TRUNCATE TABLE" if table == "ledger_transfers" else "DELETE FROM"
+            await conn.execute(text(f"{verb} `{table}`"))
         await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
         await conn.execute(
             text("INSERT INTO merchants (id, name) VALUES (:a, 'Merchant A'), (:b, 'Merchant B')"),
