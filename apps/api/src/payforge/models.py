@@ -64,6 +64,12 @@ class RefundStatus(StrEnum):
     FAILED = "failed"
 
 
+class UserRole(StrEnum):
+    OWNER = "owner"  # everything
+    DEVELOPER = "developer"  # API keys, read payments
+    VIEWER = "viewer"  # read only
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -147,3 +153,36 @@ class LedgerTransfer(Base):
     to_account: Mapped[str] = mapped_column(String(80))
     amount_minor: Mapped[int] = mapped_column(Integer)  # always > 0
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class User(Base):
+    """A person who uses the dashboard. Logs in with a password and/or GitHub."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # usr_<ulid>
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # stored lowercased
+    password_hash: Mapped[str | None] = mapped_column(String(255))  # argon2id; None = GitHub only
+    github_id: Mapped[str | None] = mapped_column(String(40), unique=True)
+    name: Mapped[str | None] = mapped_column(String(100))
+    role: Mapped[UserRole] = mapped_column(str_enum(UserRole, "user_role"), default=UserRole.OWNER)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class ApiKey(Base):
+    """Credentials for a merchant's server. The secret is shown once; only its hash is stored."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True
+    )  # key_<ulid>: public, like a username
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    secret_hash: Mapped[str] = mapped_column(String(64))  # sha-256 hex of the secret
+    secret_last4: Mapped[str] = mapped_column(String(4))  # to recognise a key in the dashboard
+    scopes: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
