@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = Field(pattern=r"^mysql\+asyncmy://")
     simbank_url: str = Field(pattern=r"^https?://")
     simbank_timeout_seconds: float = Field(default=3.0, gt=0)
+    redis_url: str = Field(pattern=r"^rediss?://")
 
 
 settings = Settings()  # values come from the environment

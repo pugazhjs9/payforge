@@ -9,6 +9,7 @@ TEST_ENV = {
     "DATABASE_URL": "mysql+asyncmy://payforge:payforge@127.0.0.1:3307/payforge_test",
     "SIMBANK_URL": "http://127.0.0.1:4999",  # tests start their own SimBank on this port
     "SIMBANK_TIMEOUT_SECONDS": "0.5",
+    "REDIS_URL": "redis://127.0.0.1:6381/1",  # database 1: never the dev data in database 0
 }
 os.environ.update(TEST_ENV)
 

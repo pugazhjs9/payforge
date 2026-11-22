@@ -10,6 +10,7 @@ from payforge.db import engine
 from payforge.errors import install_error_handlers
 from payforge.logging import configure_logging
 from payforge.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from payforge.redis import redis
 
 DESCRIPTION = """
 A multi-merchant payment gateway API (simulated bank, no real money).
@@ -26,6 +27,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
     # graceful shutdown: close outgoing connections and the database pool
     await simbank.close()
+    await redis.aclose()
     await engine.dispose()
 
 
