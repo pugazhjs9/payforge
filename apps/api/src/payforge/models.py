@@ -16,7 +16,10 @@ from sqlalchemy.types import TypeDecorator
 
 
 def utcnow() -> datetime:
-    return datetime.now(UTC)
+    """Now, in UTC, trimmed to milliseconds: DATETIME(3) rounds anything finer, and the
+    value in memory must equal the stored one (pagination cursors compare them)."""
+    now = datetime.now(UTC)
+    return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
 
 class UTCDateTime(TypeDecorator[datetime]):
