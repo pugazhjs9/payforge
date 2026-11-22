@@ -1,7 +1,12 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from payforge.api import health
+from payforge.api import health, v1
+from payforge.clients import simbank
 from payforge.config import settings
+from payforge.db import engine
 from payforge.errors import install_error_handlers
 from payforge.logging import configure_logging
 from payforge.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
@@ -16,12 +21,21 @@ A multi-merchant payment gateway API (simulated bank, no real money).
 """
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    yield
+    # graceful shutdown: close outgoing connections and the database pool
+    await simbank.close()
+    await engine.dispose()
+
+
 def create_app() -> FastAPI:
     configure_logging(settings.log_level, json=settings.environment != "development")
-    app = FastAPI(title="PayForge API", version="1.0", description=DESCRIPTION)
+    app = FastAPI(title="PayForge API", version="1.0", description=DESCRIPTION, lifespan=lifespan)
     install_error_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(v1.router)
 
     # Starlette runs the LAST added middleware FIRST: request context is outermost.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=100_000)
