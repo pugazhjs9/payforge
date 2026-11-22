@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from payforge.api import auth, health, v1
+from payforge.api import auth, github, health, v1
 from payforge.clients import simbank
 from payforge.config import settings
 from payforge.db import engine
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(v1.router)
     app.include_router(auth.router)
+    app.include_router(github.router)
 
     # Starlette runs the LAST added middleware FIRST: request context is outermost.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=100_000)
