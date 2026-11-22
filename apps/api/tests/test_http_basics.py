@@ -41,3 +41,13 @@ async def test_body_over_100kb_is_refused_with_413(client: httpx.AsyncClient) ->
 
     assert res.status_code == 413
     assert res.json()["error"]["code"] == "body_too_large"
+
+
+async def test_interactive_api_docs_and_openapi_schema(client: httpx.AsyncClient) -> None:
+    schema = await client.get("/openapi.json")
+    assert schema.status_code == 200
+    assert "/v1/payments" in schema.json()["paths"]
+
+    docs = await client.get("/docs")
+    assert docs.status_code == 200
+    assert "text/html" in docs.headers["content-type"]
