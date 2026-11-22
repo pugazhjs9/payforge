@@ -4,12 +4,13 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payforge.clients import simbank
 from payforge.db import SessionLocal
+from payforge.domain.cursor import Cursor, encode_cursor
 from payforge.domain.money import MAX_AMOUNT_MINOR, MIN_AMOUNT_MINOR, fee_for, to_minor
 from payforge.errors import NotFound, ValidationFailed
 from payforge.ids import new_id
@@ -47,6 +48,13 @@ class PaymentFailed:
 
 
 PaymentResult = PaymentSucceeded | PaymentFailed
+
+
+@dataclass(frozen=True)
+class Page:
+    data: list[Payment]
+    has_more: bool
+    next_cursor: str | None
 
 
 def parse_amount(amount: str, field: str = "amount") -> int:
@@ -179,3 +187,40 @@ async def get_payment(merchant_id: str, payment_id: str) -> Payment:
     if payment is None:
         raise NotFound("Payment")
     return payment
+
+
+async def list_payments(
+    merchant_id: str,
+    *,
+    limit: int,
+    cursor: Cursor | None = None,
+    status: PaymentStatus | None = None,
+) -> Page:
+    conditions = [Payment.merchant_id == merchant_id]
+    if status is not None:
+        conditions.append(Payment.status == status)
+    if cursor is not None:
+        # (created_at, id) < (cursor.created_at, cursor.id), newest first
+        conditions.append(
+            or_(
+                Payment.created_at < cursor.created_at,
+                and_(Payment.created_at == cursor.created_at, Payment.id < cursor.id),
+            )
+        )
+    async with SessionLocal() as session:
+        rows = list(
+            await session.scalars(
+                select(Payment)
+                .where(*conditions)
+                .order_by(Payment.created_at.desc(), Payment.id.desc())
+                .limit(limit + 1)  # one extra row tells us whether another page exists
+            )
+        )
+    has_more = len(rows) > limit
+    data = rows[:limit]
+    next_cursor = (
+        encode_cursor(Cursor(created_at=data[-1].created_at, id=data[-1].id))
+        if has_more and data
+        else None
+    )
+    return Page(data=data, has_more=has_more, next_cursor=next_cursor)

@@ -1,5 +1,6 @@
 import asyncio
 import re
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -145,6 +146,81 @@ async def test_another_merchants_payment_is_404_not_403(client: httpx.AsyncClien
 
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "not_found"
+
+
+# ── GET /v1/payments (cursor pagination) ──────────────────────────────────────
+
+
+async def seed_payments(n: int, merchant_id: str = MERCHANT_A) -> None:
+    """Five rows share each timestamp on purpose: the id must break ties."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    async with SessionLocal.begin() as session:
+        for i in range(n):
+            session.add(
+                Payment(
+                    id=f"pay_{merchant_id}_{i:04d}",
+                    merchant_id=merchant_id,
+                    amount_minor=1_000 + i,
+                    currency="INR",
+                    status=PaymentStatus.FAILED if i % 3 == 0 else PaymentStatus.SUCCEEDED,
+                    method="card",
+                    method_token="tok_card_ok",
+                    created_at=now - timedelta(seconds=i // 5),
+                )
+            )
+
+
+async def test_walks_45_payments_as_20_20_5_newest_first_without_duplicates(
+    client: httpx.AsyncClient,
+) -> None:
+    await seed_payments(45)
+    await seed_payments(3, MERCHANT_B)
+
+    seen: list[dict[str, str]] = []
+    sizes: list[int] = []
+    cursor: str | None = None
+    while True:
+        params = {"limit": 20, **({"cursor": cursor} if cursor else {})}
+        res = await client.get("/v1/payments", params=params, headers=A)
+        assert res.status_code == 200
+        sizes.append(len(res.json()["data"]))
+        seen.extend(res.json()["data"])
+        cursor = res.json()["next_cursor"]
+        assert res.json()["has_more"] is (cursor is not None)
+        if cursor is None:
+            break
+
+    assert sizes == [20, 20, 5]
+    assert len({p["id"] for p in seen}) == 45
+    keys = [(p["created_at"], p["id"]) for p in seen]
+    assert keys == sorted(keys, reverse=True)
+
+
+async def test_new_payments_between_pages_cause_no_duplicates(client: httpx.AsyncClient) -> None:
+    await seed_payments(30)
+    first = await client.get("/v1/payments", params={"limit": 10}, headers=A)
+    await client.post("/v1/payments", json=pay("5.00"), headers=A)
+    await client.post("/v1/payments", json=pay("6.00"), headers=A)
+    second = await client.get(
+        "/v1/payments", params={"limit": 10, "cursor": first.json()["next_cursor"]}, headers=A
+    )
+
+    first_ids = {p["id"] for p in first.json()["data"]}
+    assert not first_ids & {p["id"] for p in second.json()["data"]}
+
+
+async def test_status_filter(client: httpx.AsyncClient) -> None:
+    await seed_payments(30)
+    res = await client.get("/v1/payments", params={"status": "failed", "limit": 100}, headers=A)
+
+    assert len(res.json()["data"]) == 10
+    assert {p["status"] for p in res.json()["data"]} == {"failed"}
+
+
+async def test_tampered_cursor_is_400_and_limit_over_100_is_422(client: httpx.AsyncClient) -> None:
+    bad = await client.get("/v1/payments", params={"cursor": "not-a-cursor"}, headers=A)
+    assert bad.json()["error"]["code"] == "invalid_cursor"
+    assert (await client.get("/v1/payments", params={"limit": 101}, headers=A)).status_code == 422
 
 
 # ── finalizing ────────────────────────────────────────────────────────────────

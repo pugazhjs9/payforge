@@ -1,9 +1,15 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 
 from payforge.api.deps import CurrentMerchant
-from payforge.api.v1.schemas import CreatePayment, PaymentOut
+from payforge.api.v1.schemas import (
+    CreatePayment,
+    PaymentList,
+    PaymentOut,
+)
+from payforge.domain.cursor import decode_cursor
+from payforge.models import PaymentStatus
 from payforge.services import payments
 
 router = APIRouter()
@@ -36,6 +42,29 @@ async def create_payment(
     if not final:
         response.status_code = 202
     return PaymentOut.of(payment)
+
+
+@router.get("/payments", tags=["Payments"])
+async def list_payments(
+    merchant: CurrentMerchant,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[
+        str | None, Query(max_length=500, description="next_cursor from the previous page")
+    ] = None,
+    status: PaymentStatus | None = None,
+) -> PaymentList:
+    """List payments, newest first, with cursor pagination."""
+    page = await payments.list_payments(
+        merchant.id,
+        limit=limit,
+        cursor=decode_cursor(cursor) if cursor else None,
+        status=status,
+    )
+    return PaymentList(
+        data=[PaymentOut.of(p) for p in page.data],
+        has_more=page.has_more,
+        next_cursor=page.next_cursor,
+    )
 
 
 @router.get("/payments/{payment_id}", tags=["Payments"])
