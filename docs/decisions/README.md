@@ -10,3 +10,5 @@ Short notes on the important design choices: the problem, the options, what was 
 | [0004](0004-cursor-pagination.md) | Cursor pagination on `(created_at, id)` instead of offset |
 | [0005](0005-atomic-refund-reservation.md) | Reserve refund amounts with one conditional UPDATE |
 | [0006](0006-ledger-as-transfers.md) | Double-entry ledger stored as transfers, enforced by MySQL |
+| [0007](0007-sessions-for-people-jwt-for-servers.md) | Sessions for people, JWTs for servers |
+| [0008](0008-sign-in-with-github.md) | Sign in with GitHub: authorization code flow with PKCE |
