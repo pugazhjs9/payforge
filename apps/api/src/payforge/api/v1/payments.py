@@ -5,12 +5,15 @@ from fastapi import APIRouter, Query, Response
 from payforge.api.deps import CurrentMerchant
 from payforge.api.v1.schemas import (
     CreatePayment,
+    CreateRefund,
     PaymentList,
     PaymentOut,
+    RefundList,
+    RefundOut,
 )
 from payforge.domain.cursor import decode_cursor
 from payforge.models import PaymentStatus
-from payforge.services import payments
+from payforge.services import payments, refunds
 
 router = APIRouter()
 
@@ -70,3 +73,26 @@ async def list_payments(
 @router.get("/payments/{payment_id}", tags=["Payments"])
 async def get_payment(payment_id: str, merchant: CurrentMerchant) -> PaymentOut:
     return PaymentOut.of(await payments.get_payment(merchant.id, payment_id))
+
+
+@router.post(
+    "/payments/{payment_id}/refunds", status_code=201, responses=ACCEPTED, tags=["Refunds"]
+)
+async def create_refund(
+    payment_id: str, merchant: CurrentMerchant, response: Response, body: CreateRefund | None = None
+) -> RefundOut:
+    """Refund all (no body, or no `amount`) or part of a payment."""
+    body = body or CreateRefund()
+    refund, final = await refunds.create_refund(
+        merchant.id, payment_id, refunds.NewRefund(amount=body.amount, reason=body.reason)
+    )
+    if not final:
+        response.status_code = 202
+    return RefundOut.of(refund)
+
+
+@router.get("/payments/{payment_id}/refunds", tags=["Refunds"])
+async def list_refunds(payment_id: str, merchant: CurrentMerchant) -> RefundList:
+    return RefundList(
+        data=[RefundOut.of(r) for r in await refunds.list_refunds(merchant.id, payment_id)]
+    )
