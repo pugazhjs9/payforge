@@ -2,19 +2,19 @@
 
 import subprocess
 import sys
-import threading
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import uvicorn
 from sqlalchemy import text
 
 from payforge.db import engine
 from payforge.redis import redis
 from simbank.app import BankState
 from simbank.app import create_app as create_simbank
+
+from .fake_github import FakeGithub, create_fake_github
+from .servers import serve_in_thread
 
 API_DIR = Path(__file__).resolve().parents[2]
 MERCHANT_A = "mer_a"
@@ -61,22 +61,26 @@ async def clean_db(migrated_db: None) -> None:
 
 @pytest.fixture(scope="session")
 def bank() -> Iterator[BankState]:
-    """A real SimBank on port 4999, in a background thread. Its slow token (1.5 s) is
-    slower than the API's test timeout (0.5 s), on purpose."""
+    """A real SimBank on port 4999. Its slow token (1.5 s) is slower than the API's
+    test timeout (0.5 s), on purpose."""
     app = create_simbank(slow_seconds=1.5)
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=4999, log_level="warning", lifespan="off")
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        if time.monotonic() > deadline:
-            raise RuntimeError("SimBank did not start")
-        time.sleep(0.02)
-    yield app.state.bank
-    server.should_exit = True
-    thread.join(timeout=5)
+    with serve_in_thread(app, 4999):
+        yield app.state.bank
+
+
+@pytest.fixture(scope="session")
+def github_server() -> Iterator[FakeGithub]:
+    app, fake = create_fake_github()
+    with serve_in_thread(app, 4998):
+        yield fake
+
+
+@pytest.fixture
+def github(github_server: FakeGithub) -> FakeGithub:
+    """The fake GitHub, reset to its default user for each test."""
+    github_server.profile = {"id": 4242, "login": "kiran-dev", "name": "Kiran"}
+    github_server.emails = [{"email": "kiran@example.com", "primary": True, "verified": True}]
+    return github_server
 
 
 def merchant(merchant_id: str) -> dict[str, str]:
