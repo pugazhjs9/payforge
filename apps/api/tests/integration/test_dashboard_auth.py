@@ -89,3 +89,37 @@ async def test_short_password_is_422(client: httpx.AsyncClient) -> None:
 async def test_made_up_session_cookie_is_401(client: httpx.AsyncClient) -> None:
     client.cookies.set("pf_sid", "x" * 43)
     assert (await client.get("/auth/me")).status_code == 401
+
+
+# ── CSRF ──────────────────────────────────────────────────────────────────────
+
+
+async def test_cookie_without_csrf_token_cannot_change_state(client: httpx.AsyncClient) -> None:
+    await client.post("/auth/signup", json=SIGNUP)
+
+    res = await client.post("/auth/logout")
+    assert res.status_code == 403
+    assert res.json()["error"]["code"] == "csrf_token_invalid"
+    assert (await client.get("/auth/me")).status_code == 200  # still logged in
+
+
+async def test_wrong_csrf_token_is_403(client: httpx.AsyncClient) -> None:
+    await client.post("/auth/signup", json=SIGNUP)
+    assert (
+        await client.post("/auth/logout", headers={"X-CSRF-Token": "x" * 43})
+    ).status_code == 403
+
+
+async def test_request_from_another_sites_origin_is_403_even_for_login(
+    client: httpx.AsyncClient,
+) -> None:
+    res = await client.post("/auth/signup", json=SIGNUP, headers={"Origin": "https://evil.example"})
+    assert res.status_code == 403
+    assert res.json()["error"]["code"] == "bad_origin"
+
+
+async def test_our_own_dashboard_origin_is_accepted(client: httpx.AsyncClient) -> None:
+    res = await client.post(
+        "/auth/signup", json=SIGNUP, headers={"Origin": "http://localhost:3000"}
+    )
+    assert res.status_code == 201

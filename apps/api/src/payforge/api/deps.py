@@ -1,10 +1,12 @@
 """Shared FastAPI dependencies."""
 
+import secrets
 from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, Request
 
 from payforge.auth.sessions import SESSION_COOKIE, Session, get_session
+from payforge.config import settings
 from payforge.db import SessionLocal
 from payforge.errors import AppError, Forbidden, Unauthorized
 from payforge.models import Merchant, UserRole
@@ -72,3 +74,35 @@ def require_role(*roles: UserRole) -> object:
         return session
 
     return Depends(check)
+
+
+# CSRF: the browser attaches our session cookie to EVERY request to us, even one started
+# by an evil website (e.g. a hidden form). Three layers stop that:
+#   1. SameSite=Lax on the cookie (the browser won't send it on cross-site POSTs);
+#   2. check_origin: browsers send an Origin header; another site's origin is refused;
+#   3. require_csrf_token: a per-session secret other sites can't read, which our
+#      dashboard JavaScript sends back in X-CSRF-Token.
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+async def check_origin(request: Request) -> None:
+    """Refuse state-changing requests whose Origin is not our dashboard.
+    No Origin header means the caller is not a browser, so CSRF doesn't apply."""
+    origin = request.headers.get("origin")
+    if (
+        request.method in UNSAFE_METHODS
+        and origin is not None
+        and origin != settings.dashboard_origin
+    ):
+        raise Forbidden("bad_origin", "Requests from other sites are not allowed.")
+
+
+async def require_csrf_token(
+    request: Request, session: Annotated[Session | None, Depends(optional_session)]
+) -> None:
+    """State-changing requests made with a session cookie must carry its CSRF token."""
+    if request.method not in UNSAFE_METHODS or session is None:
+        return
+    sent = request.headers.get("x-csrf-token", "")
+    if not secrets.compare_digest(sent.encode(), session.csrf.encode()):  # constant time
+        raise Forbidden("csrf_token_invalid", "Missing or wrong X-CSRF-Token header.")

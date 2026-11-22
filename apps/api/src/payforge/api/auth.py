@@ -5,7 +5,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from payforge.api.deps import CurrentSession, optional_session, require_json
+from payforge.api.deps import (
+    CurrentSession,
+    check_origin,
+    optional_session,
+    require_csrf_token,
+    require_json,
+)
 from payforge.auth.sessions import (
     Session,
     clear_session_cookie,
@@ -15,7 +21,12 @@ from payforge.auth.sessions import (
 )
 from payforge.services import users
 
-router = APIRouter(prefix="/auth", tags=["Dashboard auth"], dependencies=[Depends(require_json)])
+# signup/login have no session yet, so the Origin check is their CSRF protection
+router = APIRouter(
+    prefix="/auth",
+    tags=["Dashboard auth"],
+    dependencies=[Depends(require_json), Depends(check_origin)],
+)
 
 
 class SignupIn(BaseModel):
@@ -75,7 +86,7 @@ async def login(body: LoginIn) -> Response:
     return response
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, dependencies=[Depends(require_csrf_token)])
 async def logout(session: Annotated[Session | None, Depends(optional_session)]) -> Response:
     if session is not None:
         await destroy_session(session.id)
