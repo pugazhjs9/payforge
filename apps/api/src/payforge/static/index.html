@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayForge · Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="card row">
+    <div>
+      <h1 id="merchant">PayForge</h1>
+      <div class="muted" id="user"></div>
+    </div>
+    <button class="secondary" id="logout">Log out</button>
+  </div>
+
+  <div class="card">
+    <h2>API keys</h2>
+    <p class="muted">Your server exchanges a key for a 15-minute access token at <code>POST /v1/auth/token</code>.</p>
+    <table>
+      <thead><tr><th>Name</th><th>Key ID</th><th>Scopes</th><th></th></tr></thead>
+      <tbody id="keys"></tbody>
+    </table>
+    <form id="create">
+      <label for="name">New key name</label>
+      <input id="name" type="text" required maxlength="100" placeholder="web shop server">
+      <div class="scopes">
+        <label><input type="checkbox" value="payments:read" checked> payments:read</label>
+        <label><input type="checkbox" value="payments:write" checked> payments:write</label>
+        <label><input type="checkbox" value="refunds:write" checked> refunds:write</label>
+      </div>
+      <button type="submit">Create key</button>
+      <div class="error" id="error"></div>
+    </form>
+    <div id="secret"></div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  async function refreshKeys() {
+    const { data } = await api("GET", "/dashboard/api-keys");
+    $("keys").replaceChildren(
+      ...data.map((key) =>
+        el("tr", {},
+          el("td", {}, key.name),
+          el("td", {}, el("code", {}, key.id), " …" + key.secret_last4),
+          el("td", {}, key.scopes.join(", ")),
+          el("td", {}, key.revoked_at
+            ? "revoked"
+            : el("button", { class: "danger", onclick: async () => {
+                await api("DELETE", `/dashboard/api-keys/${key.id}`);
+                refreshKeys();
+              } }, "Revoke")),
+        ),
+      ),
+    );
+  }
+
+  $("create").onsubmit = async (event) => {
+    event.preventDefault();
+    $("error").textContent = "";
+    const scopes = [...document.querySelectorAll(".scopes input:checked")].map((box) => box.value);
+    try {
+      const key = await api("POST", "/dashboard/api-keys", { name: $("name").value, scopes });
+      $("secret").replaceChildren(
+        el("div", { class: "secret" },
+          el("strong", {}, "Copy this secret now. It won't be shown again."), el("br"),
+          "Key ID: ", el("code", {}, key.id), el("br"),
+          "Secret: ", el("code", {}, key.secret)),
+      );
+      $("name").value = "";
+      refreshKeys();
+    } catch (err) {
+      $("error").textContent = err.message;
+    }
+  };
+
+  $("logout").onclick = async () => {
+    await api("POST", "/auth/logout");
+    location.href = "/app/login.html";
+  };
+
+  loadMe()
+    .then((me) => {
+      $("merchant").textContent = me.merchant.name;
+      $("user").textContent = `${me.user.email} · ${me.user.role}`;
+      return refreshKeys();
+    })
+    .catch((err) => {
+      if (err.status === 401) location.href = "/app/login.html";
+    });
+</script>
+</body>
+</html>

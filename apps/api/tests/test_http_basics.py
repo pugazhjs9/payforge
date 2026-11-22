@@ -51,3 +51,11 @@ async def test_interactive_api_docs_and_openapi_schema(client: httpx.AsyncClient
     docs = await client.get("/docs")
     assert docs.status_code == 200
     assert "text/html" in docs.headers["content-type"]
+
+
+async def test_dashboard_pages_are_served(client: httpx.AsyncClient) -> None:
+    for path in ("/app/", "/app/login.html"):
+        res = await client.get(path)
+        assert res.status_code == 200
+        assert "text/html" in res.headers["content-type"]
+    assert (await client.get("/")).headers["location"] == "/app/"

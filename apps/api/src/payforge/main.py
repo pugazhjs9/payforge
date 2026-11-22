@@ -1,7 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from payforge.api import auth, dashboard, github, health, oauth, v1
 from payforge.clients import simbank
@@ -42,6 +45,15 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(github.router)
     app.include_router(dashboard.router)
+
+    # the dashboard: a few static pages that call the API above
+    app.mount(
+        "/app", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="app"
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/app/")
 
     # Starlette runs the LAST added middleware FIRST: request context is outermost.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=100_000)

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayForge · Log in</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>PayForge</h1>
+    <p class="muted">Merchant dashboard</p>
+    <a class="button" href="/auth/github">Sign in with GitHub</a>
+  </div>
+
+  <div class="card">
+    <h2 id="title">Log in with email</h2>
+    <form id="form">
+      <div id="merchant-field" hidden>
+        <label for="merchant_name">Shop name</label>
+        <input id="merchant_name" type="text" maxlength="100">
+      </div>
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="username">
+      <label for="password">Password (at least 12 characters)</label>
+      <input id="password" type="password" required autocomplete="current-password">
+      <button type="submit" id="submit">Log in</button>
+      <button type="button" class="secondary" id="toggle">I need an account</button>
+      <div class="error" id="error"></div>
+    </form>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+  let signingUp = false;
+  const $ = (id) => document.getElementById(id);
+  if (new URLSearchParams(location.search).get("error") === "github_cancelled") {
+    $("error").textContent = "GitHub login was cancelled.";
+  }
+  $("toggle").onclick = () => {
+    signingUp = !signingUp;
+    $("merchant-field").hidden = !signingUp;
+    $("title").textContent = signingUp ? "Create an account" : "Log in with email";
+    $("submit").textContent = signingUp ? "Sign up" : "Log in";
+    $("toggle").textContent = signingUp ? "I already have an account" : "I need an account";
+  };
+  $("form").onsubmit = async (event) => {
+    event.preventDefault();
+    $("error").textContent = "";
+    try {
+      const credentials = { email: $("email").value, password: $("password").value };
+      if (signingUp) await api("POST", "/auth/signup", { ...credentials, merchant_name: $("merchant_name").value });
+      else await api("POST", "/auth/login", credentials);
+      location.href = "/app/";
+    } catch (err) {
+      $("error").textContent = err.message;
+    }
+  };
+</script>
+</body>
+</html>
