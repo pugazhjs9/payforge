@@ -23,7 +23,6 @@ CARD_TOKEN = re.compile(r"tok_card_[a-z_]+", re.ASCII)
 @dataclass(frozen=True)
 class MerchantRef:
     id: str
-    fee_bps: int
 
 
 @dataclass(frozen=True)

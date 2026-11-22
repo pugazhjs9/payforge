@@ -33,5 +33,11 @@ class Settings(BaseSettings):
     github_oauth_base: str = "https://github.com"  # overridable so tests can use a fake GitHub
     github_api_base: str = "https://api.github.com"
 
+    # access tokens (JWT) for merchant servers
+    jwt_private_key_file: str = ""  # PEM, EC P-256. Empty = a throwaway key (dev/test only)
+    jwt_issuer: str = "payforge"
+    jwt_audience: str = "payforge-api"
+    access_token_ttl_seconds: int = Field(default=15 * 60, gt=0)
+
 
 settings = Settings()  # values come from the environment

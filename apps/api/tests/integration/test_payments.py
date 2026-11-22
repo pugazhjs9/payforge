@@ -122,11 +122,15 @@ async def test_non_json_body_is_415(client: httpx.AsyncClient) -> None:
     assert res.status_code == 415
 
 
-async def test_missing_or_unknown_merchant_is_401(client: httpx.AsyncClient) -> None:
-    assert (await client.post("/v1/payments", json=pay("1.00"))).status_code == 401
-    assert (
-        await client.post("/v1/payments", json=pay("1.00"), headers=merchant("mer_x"))
-    ).status_code == 401
+async def test_no_access_token_is_401(client: httpx.AsyncClient) -> None:
+    res = await client.post("/v1/payments", json=pay("1.00"))
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "missing_token"
+
+
+async def test_the_old_x_merchant_id_header_no_longer_works(client: httpx.AsyncClient) -> None:
+    res = await client.post("/v1/payments", json=pay("1.00"), headers={"X-Merchant-Id": MERCHANT_A})
+    assert res.status_code == 401
 
 
 # ── GET /v1/payments/{id} ─────────────────────────────────────────────────────

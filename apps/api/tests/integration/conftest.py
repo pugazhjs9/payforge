@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+from payforge.auth.tokens import issue_access_token
 from payforge.db import engine
 from payforge.redis import redis
 from simbank.app import BankState
@@ -90,9 +91,15 @@ def github(github_server: FakeGithub) -> FakeGithub:
     return github_server
 
 
-def merchant(merchant_id: str) -> dict[str, str]:
-    """Headers acting as one merchant (temporary X-Merchant-Id identity)."""
-    return {"X-Merchant-Id": merchant_id}
+ALL_SCOPES = ["payments:read", "payments:write", "refunds:write"]
+
+
+def merchant(merchant_id: str, scopes: list[str] | None = None) -> dict[str, str]:
+    """Headers acting as one merchant: a valid access token, as if from POST /v1/auth/token."""
+    token = issue_access_token(
+        merchant_id=merchant_id, key_id=f"key_test_{merchant_id}", scopes=scopes or ALL_SCOPES
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def pay(amount: str, payment_method: str = "tok_card_ok", **extra: object) -> dict[str, object]:

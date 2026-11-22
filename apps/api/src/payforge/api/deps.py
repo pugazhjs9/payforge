@@ -3,14 +3,18 @@
 import secrets
 from typing import Annotated, Any
 
-from fastapi import Cookie, Depends, Header, Request
+from fastapi import Cookie, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
 from payforge.auth.sessions import SESSION_COOKIE, Session, get_session
+from payforge.auth.tokens import AccessToken, verify_access_token
 from payforge.config import settings
 from payforge.db import SessionLocal
 from payforge.errors import AppError, Forbidden, Unauthorized
-from payforge.models import Merchant, User, UserRole
+from payforge.models import User, UserRole
+from payforge.redis import redis
+from payforge.services.api_keys import REVOKED_KEYS, Scope
 from payforge.services.payments import MerchantRef
 
 
@@ -24,28 +28,6 @@ async def require_json(request: Request) -> None:
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if has_body and content_type != "application/json":
         raise AppError(415, "unsupported_media_type", "Send the body as application/json.")
-
-
-async def dev_merchant(
-    x_merchant_id: Annotated[
-        str | None, Header(description="TEMPORARY development identity")
-    ] = None,
-) -> MerchantRef:
-    """TEMPORARY: identifies the merchant from an X-Merchant-Id header.
-
-    Anyone can send any ID, so this is NOT authentication. It exists only until
-    API keys + JWT replace it.
-    """
-    if not x_merchant_id:
-        raise Unauthorized("missing_merchant", "Send an X-Merchant-Id header.")
-    async with SessionLocal() as session:
-        merchant = await session.get(Merchant, x_merchant_id)
-    if merchant is None:
-        raise Unauthorized("unknown_merchant", "Unknown merchant.")
-    return MerchantRef(id=merchant.id, fee_bps=merchant.fee_bps)
-
-
-CurrentMerchant = Annotated[MerchantRef, Depends(dev_merchant)]
 
 
 async def optional_session(
@@ -114,3 +96,36 @@ async def require_csrf_token(
     sent = request.headers.get("x-csrf-token", "")
     if not secrets.compare_digest(sent.encode(), session.csrf.encode()):  # constant time
         raise Forbidden("csrf_token_invalid", "Missing or wrong X-CSRF-Token header.")
+
+
+_bearer = HTTPBearer(auto_error=False, description="Access token from POST /v1/auth/token")
+
+
+async def require_access_token(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> AccessToken:
+    """Merchant servers authenticate with a short-lived JWT: checked with the public key,
+    no database lookup. One cheap Redis check makes revoked keys stop working at once."""
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise Unauthorized("missing_token", "Send Authorization: Bearer <access token>.")
+    token = verify_access_token(credentials.credentials)
+    if await redis.sismember(REVOKED_KEYS, token.key_id):
+        raise Unauthorized("key_revoked", "The API key behind this token was revoked.")
+    return token
+
+
+def require_scope(scope: Scope) -> Any:
+    """The merchant acting, if the token carries `scope`. The merchant ID always comes
+    from the token, never from the URL or body: that is what isolates tenants."""
+
+    async def check(token: Annotated[AccessToken, Depends(require_access_token)]) -> MerchantRef:
+        if scope not in token.scopes:
+            raise Forbidden("insufficient_scope", f"This needs the {scope} scope.")
+        return MerchantRef(id=token.merchant_id)
+
+    return Depends(check)
+
+
+PaymentsRead = Annotated[MerchantRef, require_scope("payments:read")]
+PaymentsWrite = Annotated[MerchantRef, require_scope("payments:write")]
+RefundsWrite = Annotated[MerchantRef, require_scope("refunds:write")]

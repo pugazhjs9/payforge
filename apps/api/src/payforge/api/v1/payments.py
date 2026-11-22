@@ -2,7 +2,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Response
 
-from payforge.api.deps import CurrentMerchant
+from payforge.api.deps import PaymentsRead, PaymentsWrite, RefundsWrite
 from payforge.api.v1.schemas import (
     CreatePayment,
     CreateRefund,
@@ -24,7 +24,7 @@ ACCEPTED: dict[int | str, dict[str, Any]] = {
 
 @router.post("/payments", status_code=201, responses=ACCEPTED, tags=["Payments"])
 async def create_payment(
-    body: CreatePayment, merchant: CurrentMerchant, response: Response
+    body: CreatePayment, merchant: PaymentsWrite, response: Response
 ) -> PaymentOut:
     """Charge a payment method through the bank.
 
@@ -49,7 +49,7 @@ async def create_payment(
 
 @router.get("/payments", tags=["Payments"])
 async def list_payments(
-    merchant: CurrentMerchant,
+    merchant: PaymentsRead,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[
         str | None, Query(max_length=500, description="next_cursor from the previous page")
@@ -71,7 +71,7 @@ async def list_payments(
 
 
 @router.get("/payments/{payment_id}", tags=["Payments"])
-async def get_payment(payment_id: str, merchant: CurrentMerchant) -> PaymentOut:
+async def get_payment(payment_id: str, merchant: PaymentsRead) -> PaymentOut:
     return PaymentOut.of(await payments.get_payment(merchant.id, payment_id))
 
 
@@ -79,7 +79,7 @@ async def get_payment(payment_id: str, merchant: CurrentMerchant) -> PaymentOut:
     "/payments/{payment_id}/refunds", status_code=201, responses=ACCEPTED, tags=["Refunds"]
 )
 async def create_refund(
-    payment_id: str, merchant: CurrentMerchant, response: Response, body: CreateRefund | None = None
+    payment_id: str, merchant: RefundsWrite, response: Response, body: CreateRefund | None = None
 ) -> RefundOut:
     """Refund all (no body, or no `amount`) or part of a payment."""
     body = body or CreateRefund()
@@ -92,7 +92,7 @@ async def create_refund(
 
 
 @router.get("/payments/{payment_id}/refunds", tags=["Refunds"])
-async def list_refunds(payment_id: str, merchant: CurrentMerchant) -> RefundList:
+async def list_refunds(payment_id: str, merchant: PaymentsRead) -> RefundList:
     return RefundList(
         data=[RefundOut.of(r) for r in await refunds.list_refunds(merchant.id, payment_id)]
     )
