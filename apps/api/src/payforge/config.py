@@ -39,5 +39,12 @@ class Settings(BaseSettings):
     jwt_audience: str = "payforge-api"
     access_token_ttl_seconds: int = Field(default=15 * 60, gt=0)
 
+    # rate limits
+    rate_limit_per_second: float = Field(default=25.0, gt=0)  # per merchant, on /v1
+    rate_limit_burst: int = Field(default=100, ge=1)
+    login_attempts_per_account: int = Field(default=10, ge=1)  # per email + IP, per 15 min
+    login_attempts_per_ip: int = Field(default=100, ge=1)  # per 15 min
+    signups_per_ip: int = Field(default=20, ge=1)  # per hour
+
 
 settings = Settings()  # values come from the environment
