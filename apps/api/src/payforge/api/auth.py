@@ -27,7 +27,7 @@ from payforge.config import settings
 from payforge.errors import AppError
 from payforge.logging import log
 from payforge.redis import redis
-from payforge.services import users
+from payforge.services import logos, users
 
 # signup/login have no session yet, so the Origin check is their CSRF protection
 router = APIRouter(
@@ -65,6 +65,7 @@ class SignupOut(BaseModel):
 class MerchantOut(BaseModel):
     id: str
     name: str
+    logo_url: str | None = None
 
 
 class MeOut(BaseModel):
@@ -169,6 +170,6 @@ async def me(session: CurrentSession) -> MeOut:
     user, merchant = await users.get_user(session.user_id)
     return MeOut(
         user=UserOut(id=user.id, email=user.email, name=user.name, role=user.role),
-        merchant=MerchantOut(id=merchant.id, name=merchant.name),
+        merchant=MerchantOut(id=merchant.id, name=merchant.name, logo_url=logos.logo_url(merchant)),
         csrf_token=session.csrf,
     )

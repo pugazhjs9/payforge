@@ -1,4 +1,4 @@
-"""Dashboard API (browser, session cookie): API keys and webhook endpoints."""
+"""Dashboard API (browser, session cookie): API keys, webhook endpoints, logo."""
 
 from datetime import datetime
 from typing import Annotated, Literal
@@ -14,7 +14,7 @@ from payforge.api.deps import (
     require_role,
 )
 from payforge.models import ApiKey, UserRole, WebhookAttempt, WebhookDelivery, WebhookEndpoint
-from payforge.services import api_keys, webhooks
+from payforge.services import api_keys, logos, webhooks
 from payforge.services.api_keys import Scope
 
 router = APIRouter(
@@ -229,3 +229,42 @@ async def resend_webhook_delivery(delivery_id: str, session: CurrentSession) -> 
     """Sends a finished delivery again, within seconds (202: queued, not sent yet)."""
     await webhooks.resend(session.merchant_id, delivery_id)
     return Response(status_code=202)
+
+
+# ── logo ──────────────────────────────────────────────────────────────────────
+
+can_change_logo = require_role(UserRole.OWNER)
+
+
+class LogoUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content_type: Literal["image/png", "image/jpeg"]
+
+
+class LogoUploadForm(BaseModel):
+    url: str = Field(description="POST the fields and then the file (as `file`) here.")
+    fields: dict[str, str]
+    key: str
+    max_bytes: int = logos.MAX_BYTES
+
+
+class SetLogo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(max_length=200)
+
+
+class LogoOut(BaseModel):
+    logo_url: str
+
+
+@router.post("/logo/upload", dependencies=[can_change_logo])
+async def logo_upload_form(body: LogoUploadRequest, session: CurrentSession) -> LogoUploadForm:
+    """Step 1: a form that lets the browser upload ONE image straight to storage."""
+    form = logos.upload_form(session.merchant_id, body.content_type)
+    return LogoUploadForm(url=form["url"], fields=form["fields"], key=form["key"])
+
+
+@router.put("/logo", dependencies=[can_change_logo])
+async def set_logo(body: SetLogo, session: CurrentSession) -> LogoOut:
+    """Step 2: after uploading, make it the logo (checked to really be an image)."""
+    return LogoOut(logo_url=await logos.set_logo(session.merchant_id, body.key))
