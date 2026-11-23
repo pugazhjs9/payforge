@@ -3,12 +3,15 @@
 import subprocess
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
+import httpx
 import pytest
+from aio_pika.abc import AbstractChannel, AbstractRobustConnection
 from sqlalchemy import text
 
+from payforge import messaging
 from payforge.auth.tokens import issue_access_token
 from payforge.db import engine
 from payforge.redis import redis
@@ -66,6 +69,44 @@ async def clean_db(migrated_db: None) -> None:
             text("INSERT INTO merchants (id, name) VALUES (:a, 'Merchant A'), (:b, 'Merchant B')"),
             {"a": MERCHANT_A, "b": MERCHANT_B},
         )
+
+
+RABBITMQ_ADMIN = "http://127.0.0.1:15673/api"
+TEST_VHOST = "payforge_test"
+
+
+@pytest.fixture(scope="session")
+async def amqp() -> AsyncIterator[AbstractRobustConnection]:
+    """A RabbitMQ connection to a vhost of its own, created through the management API."""
+    auth = ("guest", "guest")
+    async with httpx.AsyncClient(auth=auth) as admin:
+        (await admin.put(f"{RABBITMQ_ADMIN}/vhosts/{TEST_VHOST}")).raise_for_status()
+        (
+            await admin.put(
+                f"{RABBITMQ_ADMIN}/permissions/{TEST_VHOST}/guest",
+                json={"configure": ".*", "write": ".*", "read": ".*"},
+            )
+        ).raise_for_status()
+    connection = await messaging.connect()
+    yield connection
+    await connection.close()
+
+
+@pytest.fixture
+async def channel(amqp: AbstractRobustConnection) -> AsyncIterator[AbstractChannel]:
+    """A channel with every exchange and queue declared, and every queue empty."""
+    ch = await amqp.channel(on_return_raises=True)
+    await messaging.declare(ch)
+    for name in [
+        messaging.FANOUT_QUEUE,
+        messaging.DELIVER_QUEUE,
+        messaging.DEAD_QUEUE,
+        messaging.JOBS_QUEUE,
+        *map(messaging.retry_queue, messaging.RETRY_DELAYS),
+    ]:
+        await (await ch.get_queue(name)).purge()
+    yield ch
+    await ch.close()
 
 
 @pytest.fixture(scope="session")

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "PayForge API: payments, refunds and a double-entry ledger."
 requires-python = ">=3.13"
 dependencies = [
+    "aio-pika>=10.2.3",
     "alembic>=1.20.1",
     "argon2-cffi>=25.1.0",
     "asyncmy>=0.2.18",

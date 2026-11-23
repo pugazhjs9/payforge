@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     simbank_url: str = Field(pattern=r"^https?://")
     simbank_timeout_seconds: float = Field(default=3.0, gt=0)
     redis_url: str = Field(pattern=r"^rediss?://")
+    rabbitmq_url: str = Field(default="amqp://guest:guest@127.0.0.1:5673/", pattern=r"^amqps?://")
 
     # dashboard sessions
     dashboard_origin: str = "http://localhost:3000"

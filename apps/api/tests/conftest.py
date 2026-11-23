@@ -10,6 +10,7 @@ TEST_ENV = {
     "SIMBANK_URL": "http://127.0.0.1:4999",  # tests start their own SimBank on this port
     "SIMBANK_TIMEOUT_SECONDS": "0.5",
     "REDIS_URL": "redis://127.0.0.1:6381/1",  # database 1: never the dev data in database 0
+    "RABBITMQ_URL": "amqp://guest:guest@127.0.0.1:5673/payforge_test",  # its own vhost
     "GITHUB_CLIENT_ID": "test-client",
     "GITHUB_CLIENT_SECRET": "test-secret",
     "GITHUB_OAUTH_BASE": "http://127.0.0.1:4998",  # a fake GitHub started by the tests
