@@ -7,7 +7,6 @@
     webhooks.retry.<delay>         a waiting room per delay: when a message's time is
                                    up, RabbitMQ dead-letters it back to webhooks.deliver
     webhooks.dead                  messages that kept crashing their consumer
-    jobs                           background jobs (reports)
 
 Work queues are QUORUM queues: replicated, and with a delivery limit, so a message
 that crashes its consumer 5 times goes to the dead queue instead of looping forever.
@@ -28,7 +27,6 @@ FANOUT_QUEUE = "webhooks.fanout"
 DELIVER_QUEUE = "webhooks.deliver"
 DELIVER_KEY = "deliver"
 DEAD_QUEUE = "webhooks.dead"
-JOBS_QUEUE = "jobs"
 
 # After attempt n fails, wait RETRY_DELAYS[n - 1] seconds. 6 attempts over ~7 hours.
 RETRY_DELAYS = (10, 60, 600, 3600, 6 * 3600)
@@ -92,5 +90,4 @@ async def declare(channel: AbstractChannel) -> Topology:
             },
         )
 
-    await channel.declare_queue(JOBS_QUEUE, durable=True, arguments=_work_queue_arguments())
     return Topology(events=events, webhooks=webhooks)

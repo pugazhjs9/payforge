@@ -102,7 +102,6 @@ async def channel(amqp: AbstractRobustConnection) -> AsyncIterator[AbstractChann
         messaging.FANOUT_QUEUE,
         messaging.DELIVER_QUEUE,
         messaging.DEAD_QUEUE,
-        messaging.JOBS_QUEUE,
         *map(messaging.retry_queue, messaging.RETRY_DELAYS),
     ]:
         await (await ch.get_queue(name)).purge()

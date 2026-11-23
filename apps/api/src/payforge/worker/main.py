@@ -3,7 +3,8 @@
 One asyncio process runs:
 - the outbox relay (MySQL events → RabbitMQ), continuously;
 - the webhook consumers (RabbitMQ → merchants' servers);
-- scheduled jobs: reconciliation, the webhook sweeper, idempotency-key cleanup.
+- scheduled jobs: reconciliation, the webhook sweeper, idempotency-key cleanup;
+- report building (the reports table is its own job queue).
 
 Run as many copies as you like: the relay uses SKIP LOCKED, deliveries are claimed
 with compare-and-set, and every scheduled job tolerates a twin running at the same
@@ -26,7 +27,7 @@ from payforge.db import engine
 from payforge.logging import configure_logging, log
 from payforge.messaging import Topology
 from payforge.redis import redis
-from payforge.services import reconcile, webhooks
+from payforge.services import reconcile, reports, webhooks
 from payforge.worker import webhooks as webhook_consumers
 from payforge.worker.relay import run_relay, sleep_unless_stopped
 
@@ -74,6 +75,7 @@ async def run(stop: asyncio.Event) -> None:
             run_relay(topology.events, stop),
             every(15, "reconcile", reconcile_all, stop),
             every(10, "sweep_webhooks", sweep_webhooks(topology), stop),
+            every(2, "reports", reports.run_pending, stop),
             every(
                 600,
                 "delete_expired_idempotency_keys",
