@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     jwt_audience: str = "payforge-api"
     access_token_ttl_seconds: int = Field(default=15 * 60, gt=0)
 
+    # webhooks sent to merchants
+    webhook_timeout_seconds: float = Field(default=10.0, gt=0)
+    # LOCAL DEVELOPMENT ONLY: allow http:// and localhost/private-network webhook URLs
+    allow_insecure_webhooks: bool = False
+
     # rate limits
     rate_limit_per_second: float = Field(default=25.0, gt=0)  # per merchant, on /v1
     rate_limit_burst: int = Field(default=100, ge=1)
