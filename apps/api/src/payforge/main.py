@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from payforge.api import auth, dashboard, github, health, oauth, v1
+from payforge.api import auth, dashboard, github, health, oauth
+from payforge.api.v1.router import router as v1_router
 from payforge.clients import simbank
 from payforge.config import settings
 from payforge.db import engine
@@ -41,7 +42,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(oauth.router)  # form-encoded, so outside the JSON-only /v1 router
-    app.include_router(v1.router)
+    app.include_router(v1_router)
     app.include_router(auth.router)
     app.include_router(github.router)
     app.include_router(dashboard.router)
