@@ -9,9 +9,15 @@
 <body>
 <main>
   <div class="card row">
-    <div>
-      <h1 id="merchant">PayForge</h1>
-      <div class="muted" id="user"></div>
+    <div class="row">
+      <img id="logo" class="logo" alt="" hidden>
+      <div>
+        <h1 id="merchant">PayForge</h1>
+        <div class="muted" id="user"></div>
+        <label class="muted">Logo (PNG or JPEG, up to 512 KB):
+          <input id="logo-file" type="file" accept="image/png,image/jpeg"></label>
+        <div class="error" id="logo-error"></div>
+      </div>
     </div>
     <button class="secondary" id="logout">Log out</button>
   </div>
@@ -153,6 +159,31 @@
     }
   };
 
+  function showLogo(url) {
+    if (!url) return;
+    $("logo").src = url;
+    $("logo").hidden = false;
+  }
+
+  // The file goes from the browser straight to S3 with a presigned form;
+  // the API only signs the form and checks the result.
+  $("logo-file").onchange = async () => {
+    const file = $("logo-file").files[0];
+    $("logo-error").textContent = "";
+    if (!file) return;
+    try {
+      const form = await api("POST", "/dashboard/logo/upload", { content_type: file.type });
+      const body = new FormData();
+      Object.entries(form.fields).forEach(([name, value]) => body.append(name, value));
+      body.append("file", file);  // must come after the fields
+      const uploaded = await fetch(form.url, { method: "POST", body });
+      if (!uploaded.ok) throw new Error("Upload refused: PNG or JPEG, at most 512 KB.");
+      showLogo((await api("PUT", "/dashboard/logo", { key: form.key })).logo_url);
+    } catch (err) {
+      $("logo-error").textContent = err.message;
+    }
+  };
+
   $("logout").onclick = async () => {
     await api("POST", "/auth/logout");
     location.href = "/app/login.html";
@@ -162,6 +193,7 @@
     .then((me) => {
       $("merchant").textContent = me.merchant.name;
       $("user").textContent = `${me.user.email} · ${me.user.role}`;
+      showLogo(me.merchant.logo_url);
       return Promise.all([refreshKeys(), refreshEndpoints()]);
     })
     .catch((err) => {
