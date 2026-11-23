@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 from payforge.domain.money import format_minor
-from payforge.models import Payment, PaymentStatus, Refund, RefundStatus
+from payforge.models import Event, Payment, PaymentStatus, Refund, RefundStatus
 
 Amount = Annotated[str, Field(max_length=20, examples=["499.00"])]
 MetadataKey = Annotated[str, StringConstraints(min_length=1, max_length=40)]
@@ -125,3 +125,28 @@ class BalanceOut(BaseModel):
     object: Literal["balance"] = "balance"
     currency: Literal["INR"] = "INR"
     available: str = Field(description="Can be negative: refund fees are not returned.")
+
+
+class EventData(BaseModel):
+    object: dict[str, Any] = Field(description="The payment or refund, as it was at that moment.")
+
+
+class EventOut(BaseModel):
+    """Also the body of every webhook PayForge sends."""
+
+    id: str = Field(examples=["evt_01JD3W7K8Y8M0F2T6QH5RJZC4N"])
+    object: Literal["event"] = "event"
+    type: str = Field(examples=["payment.succeeded"])
+    created_at: datetime
+    data: EventData
+
+    @classmethod
+    def of(cls, e: Event) -> "EventOut":
+        return cls(id=e.id, type=e.type, created_at=e.created_at, data=EventData(object=e.data))
+
+
+class EventList(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[EventOut]
+    has_more: bool
+    next_cursor: str | None

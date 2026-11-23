@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payforge.api.v1.schemas import PaymentOut
 from payforge.clients import simbank
 from payforge.db import SessionLocal
 from payforge.domain.cursor import Cursor, encode_cursor
@@ -15,6 +16,7 @@ from payforge.domain.money import MAX_AMOUNT_MINOR, MIN_AMOUNT_MINOR, fee_for, t
 from payforge.errors import NotFound, ValidationFailed
 from payforge.ids import new_id
 from payforge.models import Merchant, Payment, PaymentStatus, utcnow
+from payforge.services import events
 from payforge.services.ledger import forget_balance, payment_transfers, post_transaction
 
 CARD_TOKEN = re.compile(r"tok_card_[a-z_]+", re.ASCII)
@@ -121,58 +123,70 @@ async def process_payment(payment: Payment) -> tuple[Payment, bool]:
     return latest, latest.status != PaymentStatus.PROCESSING
 
 
-async def finalize_payment(payment_id: str, result: PaymentResult) -> bool:
-    """Moves a payment out of `processing` exactly once.
+async def apply_payment_result(
+    session: AsyncSession, payment_id: str, result: PaymentResult
+) -> Payment | None:
+    """Moves a payment out of `processing`, inside the caller's transaction, exactly once.
 
     The status check is part of the UPDATE (compare-and-set), so if two processes race
-    (bank webhook vs. checker job), only one wins and only one ledger transaction is
-    written. Returns True if this call made the change.
+    (bank webhook vs. reconciliation job), only one wins. The winner writes the ledger
+    transaction and the event in the same transaction. Returns the updated payment if
+    this call made the change, None if someone else already had.
     """
-    async with SessionLocal.begin() as session:
-        row = (
-            await session.execute(
-                select(
-                    Payment.merchant_id,
-                    Payment.amount_minor,
-                    Payment.bank_charge_id,
-                    Merchant.fee_bps,
-                )
-                .join(Merchant, Merchant.id == Payment.merchant_id)
-                .where(Payment.id == payment_id)
-            )
-        ).one()
-        succeeded = isinstance(result, PaymentSucceeded)
-        fee_minor = fee_for(row.amount_minor, row.fee_bps) if succeeded else 0
-
-        changed = cast(
-            CursorResult[Any],
-            await session.execute(
-                update(Payment)
-                .where(Payment.id == payment_id, Payment.status == PaymentStatus.PROCESSING)
-                .values(
-                    status=PaymentStatus.SUCCEEDED if succeeded else PaymentStatus.FAILED,
-                    failure_code=result.failure_code if isinstance(result, PaymentFailed) else None,
-                    bank_charge_id=result.bank_charge_id or row.bank_charge_id,
-                    fee_minor=fee_minor,
-                    updated_at=utcnow(),
-                )
-                .execution_options(synchronize_session=False)
-            ),
+    row = (
+        await session.execute(
+            select(Payment.amount_minor, Payment.bank_charge_id, Merchant.fee_bps)
+            .join(Merchant, Merchant.id == Payment.merchant_id)
+            .where(Payment.id == payment_id)
         )
-        if changed.rowcount == 0:
-            return False  # someone else already finished it
+    ).one()
+    succeeded = isinstance(result, PaymentSucceeded)
+    fee_minor = fee_for(row.amount_minor, row.fee_bps) if succeeded else 0
 
-        if succeeded:
-            await post_transaction(
-                session,
-                key=f"payment:{payment_id}",
-                merchant_id=row.merchant_id,
-                transfers=payment_transfers(row.merchant_id, row.amount_minor, fee_minor),
+    changed = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == payment_id, Payment.status == PaymentStatus.PROCESSING)
+            .values(
+                status=PaymentStatus.SUCCEEDED if succeeded else PaymentStatus.FAILED,
+                failure_code=result.failure_code if isinstance(result, PaymentFailed) else None,
+                bank_charge_id=result.bank_charge_id or row.bank_charge_id,
+                fee_minor=fee_minor,
+                updated_at=utcnow(),
             )
-    # after COMMIT: deleting earlier could let a reader re-cache the old balance
+            .execution_options(synchronize_session=False)
+        ),
+    )
+    if changed.rowcount == 0:
+        return None  # someone else already finished it
+
+    payment = await session.get_one(Payment, payment_id, populate_existing=True)
     if succeeded:
-        await forget_balance(row.merchant_id)
-    return True
+        await post_transaction(
+            session,
+            key=f"payment:{payment_id}",
+            merchant_id=payment.merchant_id,
+            transfers=payment_transfers(payment.merchant_id, payment.amount_minor, fee_minor),
+        )
+    await events.record(
+        session,
+        merchant_id=payment.merchant_id,
+        type=f"payment.{payment.status}",
+        resource_id=payment.id,
+        data=PaymentOut.of(payment).model_dump(mode="json"),
+    )
+    return payment
+
+
+async def finalize_payment(payment_id: str, result: PaymentResult) -> bool:
+    """apply_payment_result in its own transaction. True if this call made the change."""
+    async with SessionLocal.begin() as session:
+        payment = await apply_payment_result(session, payment_id, result)
+    # after COMMIT: deleting earlier could let a reader re-cache the old balance
+    if payment is not None and payment.status == PaymentStatus.SUCCEEDED:
+        await forget_balance(payment.merchant_id)
+    return payment is not None
 
 
 async def get_payment(merchant_id: str, payment_id: str) -> Payment:

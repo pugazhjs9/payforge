@@ -7,12 +7,14 @@ from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payforge.api.v1.schemas import RefundOut
 from payforge.clients import simbank
 from payforge.db import SessionLocal
 from payforge.domain.money import to_minor
 from payforge.errors import Conflict, NotFound, ValidationFailed
 from payforge.ids import new_id
 from payforge.models import Payment, PaymentStatus, Refund, RefundStatus, utcnow
+from payforge.services import events
 from payforge.services.ledger import forget_balance, post_transaction, refund_transfers
 from payforge.services.payments import get_payment
 
@@ -128,50 +130,66 @@ async def process_refund(refund: Refund) -> tuple[Refund, bool]:
     return latest, latest.status != RefundStatus.PENDING
 
 
-async def finalize_refund(refund_id: str, result: RefundResult) -> bool:
-    """Moves a refund out of `pending` exactly once (compare-and-set).
-    Succeeded -> ledger transfers. Failed -> the reserved amount is given back."""
+async def apply_refund_result(
+    session: AsyncSession, refund_id: str, result: RefundResult
+) -> Refund | None:
+    """Moves a refund out of `pending` exactly once (compare-and-set), inside the caller's
+    transaction. Succeeded -> ledger transfers. Failed -> the reserved amount is given
+    back. Either way an event is recorded. Returns the refund if this call changed it."""
     failed = isinstance(result, RefundFailedResult)
-    async with SessionLocal.begin() as session:
-        changed = cast(
-            CursorResult[Any],
-            await session.execute(
-                update(Refund)
-                .where(Refund.id == refund_id, Refund.status == RefundStatus.PENDING)
-                .values(
-                    status=RefundStatus.FAILED if failed else RefundStatus.SUCCEEDED,
-                    failure_code=result.failure_code
-                    if isinstance(result, RefundFailedResult)
-                    else None,
-                    updated_at=utcnow(),
-                )
-                .execution_options(synchronize_session=False)
-            ),
-        )
-        if changed.rowcount == 0:
-            return False
+    changed = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(Refund)
+            .where(Refund.id == refund_id, Refund.status == RefundStatus.PENDING)
+            .values(
+                status=RefundStatus.FAILED if failed else RefundStatus.SUCCEEDED,
+                failure_code=result.failure_code
+                if isinstance(result, RefundFailedResult)
+                else None,
+                updated_at=utcnow(),
+            )
+            .execution_options(synchronize_session=False)
+        ),
+    )
+    if changed.rowcount == 0:
+        return None
 
-        refund = await session.get_one(Refund, refund_id)
-        if failed:
-            await session.execute(
-                update(Payment)
-                .where(Payment.id == refund.payment_id)
-                .values(
-                    amount_refunded_minor=Payment.amount_refunded_minor - refund.amount_minor,
-                    updated_at=utcnow(),
-                )
-                .execution_options(synchronize_session=False)
+    refund = await session.get_one(Refund, refund_id, populate_existing=True)
+    if failed:
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == refund.payment_id)
+            .values(
+                amount_refunded_minor=Payment.amount_refunded_minor - refund.amount_minor,
+                updated_at=utcnow(),
             )
-        else:
-            await post_transaction(
-                session,
-                key=f"refund:{refund_id}",
-                merchant_id=refund.merchant_id,
-                transfers=refund_transfers(refund.merchant_id, refund.amount_minor),
-            )
-    if not failed:
+            .execution_options(synchronize_session=False)
+        )
+    else:
+        await post_transaction(
+            session,
+            key=f"refund:{refund_id}",
+            merchant_id=refund.merchant_id,
+            transfers=refund_transfers(refund.merchant_id, refund.amount_minor),
+        )
+    await events.record(
+        session,
+        merchant_id=refund.merchant_id,
+        type=f"refund.{refund.status}",
+        resource_id=refund.id,
+        data=RefundOut.of(refund).model_dump(mode="json"),
+    )
+    return refund
+
+
+async def finalize_refund(refund_id: str, result: RefundResult) -> bool:
+    """apply_refund_result in its own transaction. True if this call made the change."""
+    async with SessionLocal.begin() as session:
+        refund = await apply_refund_result(session, refund_id, result)
+    if refund is not None and refund.status == RefundStatus.SUCCEEDED:
         await forget_balance(refund.merchant_id)  # after COMMIT
-    return True
+    return refund is not None
 
 
 async def list_refunds(merchant_id: str, payment_id: str) -> list[Refund]:
