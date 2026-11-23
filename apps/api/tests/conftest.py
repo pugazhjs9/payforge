@@ -16,6 +16,7 @@ TEST_ENV = {
     "GITHUB_OAUTH_BASE": "http://127.0.0.1:4998",  # a fake GitHub started by the tests
     "GITHUB_API_BASE": "http://127.0.0.1:4998/api",
     "ALLOW_INSECURE_WEBHOOKS": "true",  # webhook receivers in tests run on 127.0.0.1
+    "SIMBANK_WEBHOOK_SECRET": "whsec_simbank_test",
 }
 os.environ.update(TEST_ENV)
 

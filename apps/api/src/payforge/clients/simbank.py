@@ -64,6 +64,38 @@ class _ChargeAnswer(BaseModel):
     decline_code: str | None
 
 
+class _ChargeUpdateWebhook(BaseModel):
+    class _Charge(_ChargeAnswer):
+        reference: str
+
+    id: str
+    type: Literal["charge.updated"]
+    charge: _Charge
+
+
+@dataclass(frozen=True)
+class ChargeUpdate:
+    """The bank telling us, later, what happened to a charge (e.g. a UPI payment)."""
+
+    event_id: str
+    type: str
+    reference: str  # our payment id
+    outcome: ChargeOutcome
+    payload: dict[str, Any]
+
+
+def parse_charge_update(body: bytes) -> ChargeUpdate:
+    """Raises ValueError if the body is not a charge.updated webhook."""
+    webhook = _ChargeUpdateWebhook.model_validate_json(body)
+    return ChargeUpdate(
+        event_id=webhook.id,
+        type=webhook.type,
+        reference=webhook.charge.reference,
+        outcome=_charge_outcome(webhook.charge),
+        payload=webhook.model_dump(mode="json"),
+    )
+
+
 class _RefundAnswer(BaseModel):
     refund_id: str
     status: Literal["succeeded", "failed"]

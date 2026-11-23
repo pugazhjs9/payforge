@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from payforge.api import auth, dashboard, github, health, oauth
+from payforge.api import auth, bank_webhooks, dashboard, github, health, oauth
 from payforge.api.v1.router import router as v1_router
 from payforge.clients import simbank
 from payforge.config import settings
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(github.router)
     app.include_router(dashboard.router)
+    app.include_router(bank_webhooks.router)
 
     # the dashboard: a few static pages that call the API above
     app.mount(

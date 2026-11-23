@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = Field(pattern=r"^mysql\+asyncmy://")
     simbank_url: str = Field(pattern=r"^https?://")
     simbank_timeout_seconds: float = Field(default=3.0, gt=0)
+    simbank_webhook_secret: str = ""  # verifies webhooks from the bank; empty = refuse them
     redis_url: str = Field(pattern=r"^rediss?://")
     rabbitmq_url: str = Field(default="amqp://guest:guest@127.0.0.1:5673/", pattern=r"^amqps?://")
 

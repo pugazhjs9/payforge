@@ -113,8 +113,11 @@ async def channel(amqp: AbstractRobustConnection) -> AsyncIterator[AbstractChann
 @pytest.fixture(scope="session")
 def bank() -> Iterator[BankState]:
     """A real SimBank on port 4999. Its slow token (1.5 s) is slower than the API's
-    test timeout (0.5 s), on purpose."""
-    app = create_simbank(slow_seconds=1.5)
+    test timeout (0.5 s), on purpose. UPI payments settle after 0.2 s; their webhooks
+    are recorded in bank.webhooks, and tests hand them to the API themselves."""
+    app = create_simbank(
+        slow_seconds=1.5, upi_seconds=0.2, webhook_url=None, webhook_secret="whsec_simbank_test"
+    )
     with serve_in_thread(app, 4999):
         yield app.state.bank
 

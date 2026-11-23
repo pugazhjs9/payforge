@@ -20,6 +20,7 @@ from payforge.services import events
 from payforge.services.ledger import forget_balance, payment_transfers, post_transaction
 
 CARD_TOKEN = re.compile(r"tok_card_[a-z_]+", re.ASCII)
+UPI_VPA = re.compile(r"upi:[a-z0-9._-]{2,64}@[a-z0-9]{2,64}", re.ASCII)  # upi:kiran@okbank
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ def parse_amount(amount: str, field: str = "amount") -> int:
 def payment_method_of(token: str) -> str:
     if CARD_TOKEN.fullmatch(token):
         return "card"
+    if UPI_VPA.fullmatch(token):
+        return "upi"  # asynchronous: the bank answers "pending", then sends a webhook
     raise ValidationFailed("payment_method", "unknown payment method")
 
 
