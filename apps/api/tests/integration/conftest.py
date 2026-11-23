@@ -19,6 +19,7 @@ from simbank.app import BankState
 from simbank.app import create_app as create_simbank
 
 from .fake_github import FakeGithub, create_fake_github
+from .fake_merchant import FakeMerchant, create_fake_merchant
 from .servers import serve_in_thread
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -131,6 +132,23 @@ def github(github_server: FakeGithub) -> FakeGithub:
     github_server.profile = {"id": 4242, "login": "kiran-dev", "name": "Kiran"}
     github_server.emails = [{"email": "kiran@example.com", "primary": True, "verified": True}]
     return github_server
+
+
+MERCHANT_SITE = "http://127.0.0.1:4996"
+
+
+@pytest.fixture(scope="session")
+def merchant_site_server() -> Iterator[FakeMerchant]:
+    app, fake = create_fake_merchant()
+    with serve_in_thread(app, 4996):
+        yield fake
+
+
+@pytest.fixture
+def merchant_site(merchant_site_server: FakeMerchant) -> FakeMerchant:
+    """A merchant's webhook receiver on MERCHANT_SITE, emptied for each test."""
+    merchant_site_server.reset()
+    return merchant_site_server
 
 
 ALL_SCOPES = ["payments:read", "payments:write", "refunds:write"]
