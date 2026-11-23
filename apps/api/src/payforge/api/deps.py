@@ -3,15 +3,18 @@
 import secrets
 from typing import Annotated, Any
 
-from fastapi import Cookie, Depends, Request
+from fastapi import Cookie, Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.exceptions import RedisError
 from sqlalchemy import select
 
+from payforge import ratelimit
 from payforge.auth.sessions import SESSION_COOKIE, Session, get_session
 from payforge.auth.tokens import AccessToken, verify_access_token
 from payforge.config import settings
 from payforge.db import SessionLocal
 from payforge.errors import AppError, Forbidden, Unauthorized
+from payforge.logging import log
 from payforge.models import User, UserRole
 from payforge.redis import redis
 from payforge.services.api_keys import REVOKED_KEYS, Scope
@@ -112,6 +115,34 @@ async def require_access_token(
     if await redis.sismember(REVOKED_KEYS, token.key_id):
         raise Unauthorized("key_revoked", "The API key behind this token was revoked.")
     return token
+
+
+async def rate_limit_merchant(
+    response: Response, token: Annotated[AccessToken, Depends(require_access_token)]
+) -> None:
+    """One token bucket per MERCHANT (not per API key: more keys must not mean more quota).
+
+    Fails OPEN: if Redis is down, requests go through unlimited. A broken limiter must
+    not take every merchant's checkout down with it; the database is still protected by
+    its connection pool, and the load balancer has its own per-IP limits.
+    """
+    try:
+        decision = await ratelimit.take_token(
+            f"rl:api:{token.merchant_id}",
+            rate_per_second=settings.rate_limit_per_second,
+            burst=settings.rate_limit_burst,
+        )
+    except RedisError as exc:
+        log.warning("rate_limiter_unavailable", error=str(exc))
+        return
+    if not decision.allowed:
+        raise AppError(
+            429,
+            "rate_limited",
+            f"Too many requests. Retry in {decision.retry_after_seconds} s.",
+            headers=decision.headers(),
+        )
+    response.headers.update(decision.headers())
 
 
 def require_scope(scope: Scope) -> Any:
