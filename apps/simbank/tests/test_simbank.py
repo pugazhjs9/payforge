@@ -1,11 +1,12 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from simbank.app import BankState, create_app
+from simbank.app import BankState, create_app, sign
 
 
 def make_client(app: FastAPI) -> httpx.AsyncClient:
@@ -100,3 +101,77 @@ async def test_refund_failures(
 
     assert res.json()["status"] == "failed"
     assert res.json()["failure_code"] == code
+
+
+# ── UPI: asynchronous, settled later, announced by a signed webhook ───────────
+
+
+async def settled(bank: BankState, count: int = 1) -> None:
+    for _ in range(100):
+        if len(bank.webhooks) >= count:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("no webhook")
+
+
+def upi_bank(**options: object) -> FastAPI:
+    return create_app(upi_seconds=0.05, webhook_secret="whsec_test", **options)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("vpa", "status", "code"),
+    [
+        ("kiran@okbank", "approved", None),
+        ("fail@okbank", "declined", "upi_declined"),
+        ("expire@okbank", "declined", "upi_expired"),
+    ],
+)
+async def test_upi_is_pending_then_settled_with_a_signed_webhook(
+    vpa: str, status: str, code: str | None
+) -> None:
+    app = upi_bank()
+    state: BankState = app.state.bank
+    async with make_client(app) as client:
+        res = await client.post("/charges", json=charge("pay_upi", f"upi:{vpa}"))
+        assert res.json()["status"] == "pending"
+        await settled(state)
+
+    [sent] = state.webhooks
+    payload = json.loads(sent.body)
+    assert payload["type"] == "charge.updated"
+    assert (payload["charge"]["status"], payload["charge"]["decline_code"]) == (status, code)
+    timestamp = sent.headers["SimBank-Signature"].split(",")[0].removeprefix("t=")
+    assert sent.headers["SimBank-Signature"] == sign("whsec_test", sent.body, int(timestamp))
+
+
+async def test_upi_webhook_is_retried_until_it_gets_a_2xx() -> None:
+    answers = iter([500, 503, 200])
+    calls: list[httpx.Request] = []
+
+    def receiver(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(next(answers))
+
+    app = upi_bank(
+        webhook_url="http://payforge/webhooks/simbank",
+        webhook_transport=httpx.MockTransport(receiver),
+        retry_delays=(0.01, 0.01, 0.01),
+    )
+    async with make_client(app) as client:
+        await client.post("/charges", json=charge("pay_upi", "upi:kiran@okbank"))
+        await settled(app.state.bank)
+
+    assert len(calls) == 3
+    assert app.state.bank.webhooks[0].delivered is True
+
+
+async def test_same_upi_reference_twice_is_one_charge_and_one_webhook() -> None:
+    app = upi_bank()
+    async with make_client(app) as client:
+        first = await client.post("/charges", json=charge("pay_upi", "upi:kiran@okbank"))
+        again = await client.post("/charges", json=charge("pay_upi", "upi:kiran@okbank"))
+        await settled(app.state.bank)
+        await asyncio.sleep(0.1)
+
+    assert first.json()["charge_id"] == again.json()["charge_id"]
+    assert len(app.state.bank.webhooks) == 1
