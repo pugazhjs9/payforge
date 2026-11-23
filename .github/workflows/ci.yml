@@ -45,7 +45,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy apps/api/src apps/simbank/src
+      - run: uv run mypy apps/api/src apps/simbank/src apps/demo-shop/src
       # binary logging is on by default; allow the app user to create the ledger triggers
       - run: mysql -h 127.0.0.1 -P 3307 -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1"
       # SeaweedFS (S3 API) needs a start command, which service containers can't take

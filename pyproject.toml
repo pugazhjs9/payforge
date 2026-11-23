@@ -3,7 +3,7 @@ name = "payforge"
 version = "0.1.0"
 description = "A multi-merchant payment gateway API (FastAPI + MySQL)."
 requires-python = ">=3.13"
-dependencies = ["payforge-api", "simbank"]
+dependencies = ["payforge-api", "simbank", "demo-shop"]
 
 [tool.uv]
 package = false
@@ -14,6 +14,7 @@ members = ["apps/*"]
 [tool.uv.sources]
 payforge-api = { workspace = true }
 simbank = { workspace = true }
+demo-shop = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -32,7 +33,7 @@ target-version = "py313"
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "S", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["payforge", "simbank"]
+known-first-party = ["payforge", "simbank", "demo_shop"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101", "S105", "S106", "S107", "S311", "S603", "S608"]
@@ -46,7 +47,7 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
-testpaths = ["apps/simbank/tests", "apps/api/tests"]
+testpaths = ["apps/simbank/tests", "apps/demo-shop/tests", "apps/api/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
