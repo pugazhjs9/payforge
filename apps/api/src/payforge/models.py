@@ -223,3 +223,18 @@ class IdempotencyKey(Base):
     locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class Event(Base):
+    """Something that happened to a resource (payment.succeeded…). Written in the same
+    transaction as the change itself, then published by the relay (transactional outbox)."""
+
+    __tablename__ = "events"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # evt_<ulid>
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
+    type: Mapped[str] = mapped_column(String(50))
+    resource_id: Mapped[str] = mapped_column(String(40))
+    data: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
