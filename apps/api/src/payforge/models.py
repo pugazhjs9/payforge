@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.mysql import DATETIME, VARCHAR
 from sqlalchemy.engine import Dialect
@@ -76,6 +77,13 @@ class RefundStatus(StrEnum):
 class IdempotencyStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+
+
+class DeliveryStatus(StrEnum):
+    PENDING = "pending"  # waiting for (another) attempt
+    SUCCEEDED = "succeeded"  # the endpoint answered 2xx
+    FAILED = "failed"  # gave up after the last retry
+    CANCELED = "canceled"  # the endpoint was deleted
 
 
 class UserRole(StrEnum):
@@ -238,3 +246,57 @@ class Event(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class WebhookEndpoint(Base):
+    """A URL on the merchant's side that receives events, signed with `secret`."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # we_<ulid>
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
+    url: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(String(100))
+    secret: Mapped[str] = mapped_column(String(64))  # whsec_…
+    event_types: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    def wants(self, event_type: str) -> bool:
+        return "*" in self.event_types or event_type in self.event_types
+
+
+class WebhookDelivery(Base):
+    """One event going to one endpoint, over one or more attempts."""
+
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (UniqueConstraint("event_id", "endpoint_id"),)
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # wd_<ulid>
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
+    endpoint_id: Mapped[str] = mapped_column(ForeignKey("webhook_endpoints.id"))
+    event_id: Mapped[str] = mapped_column(ForeignKey("events.id"))
+    status: Mapped[DeliveryStatus] = mapped_column(
+        str_enum(DeliveryStatus, "delivery_status"), default=DeliveryStatus.PENDING
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_status_code: Mapped[int | None] = mapped_column(SmallInteger)
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class WebhookAttempt(Base):
+    """The log line of one HTTP attempt, shown in the dashboard."""
+
+    __tablename__ = "webhook_attempts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("webhook_deliveries.id"))
+    number: Mapped[int] = mapped_column(Integer)
+    status_code: Mapped[int | None] = mapped_column(SmallInteger)
+    error: Mapped[str | None] = mapped_column(String(300))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    response_body: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
