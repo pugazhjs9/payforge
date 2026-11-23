@@ -15,7 +15,7 @@ from payforge.domain.money import MAX_AMOUNT_MINOR, MIN_AMOUNT_MINOR, fee_for, t
 from payforge.errors import NotFound, ValidationFailed
 from payforge.ids import new_id
 from payforge.models import Merchant, Payment, PaymentStatus, utcnow
-from payforge.services.ledger import payment_transfers, post_transaction
+from payforge.services.ledger import forget_balance, payment_transfers, post_transaction
 
 CARD_TOKEN = re.compile(r"tok_card_[a-z_]+", re.ASCII)
 
@@ -174,7 +174,10 @@ async def finalize_payment(payment_id: str, result: PaymentResult) -> bool:
                 merchant_id=row.merchant_id,
                 transfers=payment_transfers(row.merchant_id, row.amount_minor, fee_minor),
             )
-        return True
+    # after COMMIT: deleting earlier could let a reader re-cache the old balance
+    if succeeded:
+        await forget_balance(row.merchant_id)
+    return True
 
 
 async def get_payment(merchant_id: str, payment_id: str) -> Payment:

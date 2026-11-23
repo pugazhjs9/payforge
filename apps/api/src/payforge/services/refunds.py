@@ -12,7 +12,7 @@ from payforge.domain.money import to_minor
 from payforge.errors import Conflict, NotFound, ValidationFailed
 from payforge.ids import new_id
 from payforge.models import Payment, PaymentStatus, Refund, RefundStatus, utcnow
-from payforge.services.ledger import post_transaction, refund_transfers
+from payforge.services.ledger import forget_balance, post_transaction, refund_transfers
 from payforge.services.payments import get_payment
 
 
@@ -166,7 +166,9 @@ async def finalize_refund(refund_id: str, result: RefundResult) -> bool:
                 merchant_id=refund.merchant_id,
                 transfers=refund_transfers(refund.merchant_id, refund.amount_minor),
             )
-        return True
+    if not failed:
+        await forget_balance(refund.merchant_id)  # after COMMIT
+    return True
 
 
 async def list_refunds(merchant_id: str, payment_id: str) -> list[Refund]:

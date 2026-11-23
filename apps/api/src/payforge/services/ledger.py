@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payforge import cache
 from payforge.db import SessionLocal
 from payforge.ids import new_id
 from payforge.models import LedgerTransaction, LedgerTransfer
 
+BALANCE_TTL_SECONDS = 30
 WORLD_BANK = "world:bank"  # money coming in from / going out to the outside world
 PLATFORM_FEES = "platform:fees"  # PayForge's earnings
 
@@ -86,3 +88,26 @@ async def get_balance(account: str) -> int:
     async with SessionLocal() as session:
         balance = await session.scalar(select(money_in - money_out))
     return int(balance or 0)
+
+
+def balance_cache_key(merchant_id: str) -> str:
+    return f"cache:balance:{merchant_id}"
+
+
+async def merchant_balance(merchant_id: str) -> int:
+    """The merchant's balance, cached. get_balance() sums every transfer the merchant
+    ever had, so it gets slower as the ledger grows; the cache absorbs dashboards and
+    scripts polling it. Whoever posts to the ledger calls forget_balance() after COMMIT.
+
+    Display only: anything that MOVES money (payouts, later) must read get_balance().
+    """
+    value = await cache.get_or_load(
+        balance_cache_key(merchant_id),
+        BALANCE_TTL_SECONDS,
+        lambda: get_balance(merchant_account(merchant_id)),
+    )
+    return int(value)
+
+
+async def forget_balance(merchant_id: str) -> None:
+    await cache.invalidate(balance_cache_key(merchant_id))
