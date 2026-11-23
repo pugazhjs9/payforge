@@ -12,7 +12,7 @@ from payforge.models import LedgerTransaction, LedgerTransfer, Payment, PaymentS
 from payforge.services.payments import PaymentFailed, PaymentSucceeded, finalize_payment
 from simbank.app import BankState
 
-from .conftest import MERCHANT_A, MERCHANT_B, merchant, pay
+from .conftest import MERCHANT_A, MERCHANT_B, merchant, pay, with_key
 
 A = merchant(MERCHANT_A)
 B = merchant(MERCHANT_B)
@@ -31,7 +31,7 @@ async def test_approved_card_is_201_succeeded_and_credits_the_balance(
     client: httpx.AsyncClient,
 ) -> None:
     res = await client.post(
-        "/v1/payments", json=pay("499.00", description="Order #1042"), headers=A
+        "/v1/payments", json=pay("499.00", description="Order #1042"), headers=with_key(A)
     )
 
     assert res.status_code == 201
@@ -54,7 +54,7 @@ async def test_approved_card_is_201_succeeded_and_credits_the_balance(
 async def test_decline_is_still_201_with_status_failed(
     client: httpx.AsyncClient, token: str, code: str
 ) -> None:
-    res = await client.post("/v1/payments", json=pay("100.00", token), headers=A)
+    res = await client.post("/v1/payments", json=pay("100.00", token), headers=with_key(A))
 
     assert res.status_code == 201
     assert res.json()["status"] == "failed"
@@ -66,7 +66,9 @@ async def test_decline_is_still_201_with_status_failed(
 async def test_bank_slower_than_our_timeout_is_202_processing(
     client: httpx.AsyncClient, bank: BankState
 ) -> None:
-    res = await client.post("/v1/payments", json=pay("100.00", "tok_card_slow"), headers=A)
+    res = await client.post(
+        "/v1/payments", json=pay("100.00", "tok_card_slow"), headers=with_key(A)
+    )
 
     assert res.status_code == 202
     assert res.json()["status"] == "processing"
@@ -78,7 +80,7 @@ async def test_bank_unreachable_is_202_not_500(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "simbank_url", "http://127.0.0.1:1")
-    res = await client.post("/v1/payments", json=pay("100.00"), headers=A)
+    res = await client.post("/v1/payments", json=pay("100.00"), headers=with_key(A))
 
     assert res.status_code == 202
     assert res.json()["status"] == "processing"
@@ -100,7 +102,7 @@ async def test_bank_unreachable_is_202_not_500(
 async def test_invalid_values_are_422_with_details(
     client: httpx.AsyncClient, override: dict[str, object], field: str
 ) -> None:
-    res = await client.post("/v1/payments", json={**pay("100.00"), **override}, headers=A)
+    res = await client.post("/v1/payments", json={**pay("100.00"), **override}, headers=with_key(A))
 
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "validation_failed"
@@ -137,15 +139,15 @@ async def test_the_old_x_merchant_id_header_no_longer_works(client: httpx.AsyncC
 
 
 async def test_get_own_payment(client: httpx.AsyncClient) -> None:
-    created = await client.post("/v1/payments", json=pay("10.00"), headers=A)
-    res = await client.get(f"/v1/payments/{created.json()['id']}", headers=A)
+    created = await client.post("/v1/payments", json=pay("10.00"), headers=with_key(A))
+    res = await client.get(f"/v1/payments/{created.json()['id']}", headers=with_key(A))
 
     assert res.status_code == 200
     assert res.json()["id"] == created.json()["id"]
 
 
 async def test_another_merchants_payment_is_404_not_403(client: httpx.AsyncClient) -> None:
-    created = await client.post("/v1/payments", json=pay("10.00"), headers=A)
+    created = await client.post("/v1/payments", json=pay("10.00"), headers=with_key(A))
     res = await client.get(f"/v1/payments/{created.json()['id']}", headers=B)
 
     assert res.status_code == 404
@@ -203,8 +205,8 @@ async def test_walks_45_payments_as_20_20_5_newest_first_without_duplicates(
 async def test_new_payments_between_pages_cause_no_duplicates(client: httpx.AsyncClient) -> None:
     await seed_payments(30)
     first = await client.get("/v1/payments", params={"limit": 10}, headers=A)
-    await client.post("/v1/payments", json=pay("5.00"), headers=A)
-    await client.post("/v1/payments", json=pay("6.00"), headers=A)
+    await client.post("/v1/payments", json=pay("5.00"), headers=with_key(A))
+    await client.post("/v1/payments", json=pay("6.00"), headers=with_key(A))
     second = await client.get(
         "/v1/payments", params={"limit": 10, "cursor": first.json()["next_cursor"]}, headers=A
     )
@@ -233,7 +235,9 @@ async def test_tampered_cursor_is_400_and_limit_over_100_is_422(client: httpx.As
 async def test_racing_finalizers_exactly_one_wins_and_ledger_written_once(
     client: httpx.AsyncClient,
 ) -> None:
-    res = await client.post("/v1/payments", json=pay("100.00", "tok_card_slow"), headers=A)
+    res = await client.post(
+        "/v1/payments", json=pay("100.00", "tok_card_slow"), headers=with_key(A)
+    )
     payment_id = res.json()["id"]
 
     results = await asyncio.gather(

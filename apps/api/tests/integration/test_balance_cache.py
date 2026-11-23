@@ -5,7 +5,7 @@ from payforge.db import SessionLocal
 from payforge.redis import redis
 from payforge.services.ledger import balance_cache_key, payment_transfers, post_transaction
 
-from .conftest import MERCHANT_A, MERCHANT_B, merchant, pay
+from .conftest import MERCHANT_A, MERCHANT_B, merchant, pay, with_key
 
 A = merchant(MERCHANT_A)
 pytestmark = pytest.mark.usefixtures("bank")
@@ -37,23 +37,25 @@ async def test_a_succeeded_payment_refreshes_the_cached_balance(
     client: httpx.AsyncClient,
 ) -> None:
     assert await balance(client) == "0.00"  # now cached
-    await client.post("/v1/payments", json=pay("100.00"), headers=A)
+    await client.post("/v1/payments", json=pay("100.00"), headers=with_key(A))
 
     assert await balance(client) == "98.00"
 
 
 async def test_a_succeeded_refund_refreshes_the_cached_balance(client: httpx.AsyncClient) -> None:
-    payment = await client.post("/v1/payments", json=pay("100.00"), headers=A)
+    payment = await client.post("/v1/payments", json=pay("100.00"), headers=with_key(A))
     assert await balance(client) == "98.00"  # now cached
     await client.post(
-        f"/v1/payments/{payment.json()['id']}/refunds", json={"amount": "40.00"}, headers=A
+        f"/v1/payments/{payment.json()['id']}/refunds",
+        json={"amount": "40.00"},
+        headers=with_key(A),
     )
 
     assert await balance(client) == "58.00"
 
 
 async def test_cache_keys_are_per_merchant(client: httpx.AsyncClient) -> None:
-    await client.post("/v1/payments", json=pay("100.00"), headers=A)
+    await client.post("/v1/payments", json=pay("100.00"), headers=with_key(A))
 
     assert await balance(client) == "98.00"
     assert await balance(client, merchant(MERCHANT_B)) == "0.00"

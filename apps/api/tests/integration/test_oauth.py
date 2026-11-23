@@ -4,7 +4,7 @@ import pytest
 
 from payforge.services.api_keys import create_api_key
 
-from .conftest import MERCHANT_A, pay
+from .conftest import MERCHANT_A, pay, with_key
 
 pytestmark = pytest.mark.usefixtures("bank")
 
@@ -78,7 +78,7 @@ async def test_a_read_only_key_cannot_create_payments(client: httpx.AsyncClient)
     token = (await get_token(client, *await new_key(["payments:read"]))).json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    res = await client.post("/v1/payments", json=pay("10.00"), headers=headers)
+    res = await client.post("/v1/payments", json=pay("10.00"), headers=with_key(headers))
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "insufficient_scope"
     assert (await client.get("/v1/payments", headers=headers)).status_code == 200

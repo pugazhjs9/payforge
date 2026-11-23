@@ -128,12 +128,6 @@ async def process_refund(refund: Refund) -> tuple[Refund, bool]:
     return latest, latest.status != RefundStatus.PENDING
 
 
-async def create_refund(merchant_id: str, payment_id: str, data: NewRefund) -> tuple[Refund, bool]:
-    async with SessionLocal.begin() as session:
-        refund = await reserve_refund(session, merchant_id, payment_id, data)
-    return await process_refund(refund)
-
-
 async def finalize_refund(refund_id: str, result: RefundResult) -> bool:
     """Moves a refund out of `pending` exactly once (compare-and-set).
     Succeeded -> ledger transfers. Failed -> the reserved amount is given back."""

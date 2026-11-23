@@ -121,12 +121,6 @@ async def process_payment(payment: Payment) -> tuple[Payment, bool]:
     return latest, latest.status != PaymentStatus.PROCESSING
 
 
-async def create_payment(merchant: MerchantRef, data: NewPayment) -> tuple[Payment, bool]:
-    async with SessionLocal.begin() as session:
-        payment = await insert_payment(session, merchant, data)
-    return await process_payment(payment)
-
-
 async def finalize_payment(payment_id: str, result: PaymentResult) -> bool:
     """Moves a payment out of `processing` exactly once.
 

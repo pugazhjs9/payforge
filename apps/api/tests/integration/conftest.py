@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -104,3 +105,8 @@ def merchant(merchant_id: str, scopes: list[str] | None = None) -> dict[str, str
 
 def pay(amount: str, payment_method: str = "tok_card_ok", **extra: object) -> dict[str, object]:
     return {"amount": amount, "currency": "INR", "payment_method": payment_method, **extra}
+
+
+def with_key(headers: dict[str, str], key: str | None = None) -> dict[str, str]:
+    """Adds an Idempotency-Key (a fresh one unless given): required on every create."""
+    return {**headers, "Idempotency-Key": key or f"test-{uuid.uuid4()}"}
