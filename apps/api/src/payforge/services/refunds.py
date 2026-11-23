@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from payforge.clients import simbank
 from payforge.db import SessionLocal
@@ -36,16 +37,20 @@ RefundResult = RefundSucceededResult | RefundFailedResult
 
 
 async def reserve_refund(
-    merchant_id: str, payment_id: str, data: NewRefund, refund_id: str | None = None
+    session: AsyncSession, merchant_id: str, payment_id: str, data: NewRefund
 ) -> Refund:
-    """Step 1, in one database transaction:
+    """Step 1, inside the caller's database transaction:
 
     - reserve the amount on the payment with ONE conditional UPDATE, so two refunds
       racing each other can never take more than the payment amount;
     - insert the refund row as `pending`.
     The bank is not called yet.
     """
-    payment = await get_payment(merchant_id, payment_id)  # 404 for other merchants
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id, Payment.merchant_id == merchant_id)
+    )
+    if payment is None:
+        raise NotFound("Payment")  # also for another merchant's payment
     if data.amount is not None:
         amount_minor = to_minor(data.amount)
         if amount_minor <= 0:
@@ -55,45 +60,45 @@ async def reserve_refund(
         if amount_minor <= 0:
             raise Conflict("nothing_to_refund", "This payment has already been fully refunded.")
 
-    async with SessionLocal.begin() as session:
-        # The check and the write are one statement: InnoDB applies racing updates to
-        # the same row one after another, re-checking the WHERE clause each time.
-        reserved = cast(
-            CursorResult[Any],
-            await session.execute(
-                update(Payment)
-                .where(
-                    Payment.id == payment_id,
-                    Payment.merchant_id == merchant_id,
-                    Payment.status == PaymentStatus.SUCCEEDED,
-                    Payment.amount_refunded_minor + amount_minor <= Payment.amount_minor,
-                )
-                .values(
-                    amount_refunded_minor=Payment.amount_refunded_minor + amount_minor,
-                    updated_at=utcnow(),
-                )
-                .execution_options(synchronize_session=False)
-            ),
-        )
-        if reserved.rowcount == 0:
-            status = await session.scalar(select(Payment.status).where(Payment.id == payment_id))
-            if status != PaymentStatus.SUCCEEDED:
-                raise Conflict(
-                    "payment_not_refundable",
-                    f"Only succeeded payments can be refunded (this one is {status}).",
-                )
-            raise Conflict(
-                "refund_exceeds_remaining", "The refund is larger than the amount left to refund."
+    # The check and the write are one statement: InnoDB applies racing updates to
+    # the same row one after another, re-checking the WHERE clause each time.
+    reserved = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(Payment)
+            .where(
+                Payment.id == payment_id,
+                Payment.merchant_id == merchant_id,
+                Payment.status == PaymentStatus.SUCCEEDED,
+                Payment.amount_refunded_minor + amount_minor <= Payment.amount_minor,
             )
-
-        refund = Refund(
-            id=refund_id or new_id("re"),
-            payment_id=payment_id,
-            merchant_id=merchant_id,
-            amount_minor=amount_minor,
-            reason=data.reason,
+            .values(
+                amount_refunded_minor=Payment.amount_refunded_minor + amount_minor,
+                updated_at=utcnow(),
+            )
+            .execution_options(synchronize_session=False)
+        ),
+    )
+    if reserved.rowcount == 0:
+        status = await session.scalar(select(Payment.status).where(Payment.id == payment_id))
+        if status != PaymentStatus.SUCCEEDED:
+            raise Conflict(
+                "payment_not_refundable",
+                f"Only succeeded payments can be refunded (this one is {status}).",
+            )
+        raise Conflict(
+            "refund_exceeds_remaining", "The refund is larger than the amount left to refund."
         )
-        session.add(refund)
+
+    refund = Refund(
+        id=new_id("re"),
+        payment_id=payment_id,
+        merchant_id=merchant_id,
+        amount_minor=amount_minor,
+        reason=data.reason,
+    )
+    session.add(refund)
+    await session.flush()
     return refund
 
 
@@ -107,6 +112,8 @@ async def load_refund(refund_id: str) -> Refund:
 
 async def process_refund(refund: Refund) -> tuple[Refund, bool]:
     """Step 2: ask the bank (reference = refund ID) and record the answer."""
+    if refund.status != RefundStatus.PENDING:
+        return refund, True  # already finished (a retry resuming after a crash)
     outcome = await simbank.refund(
         reference=refund.id, charge_reference=refund.payment_id, amount_minor=refund.amount_minor
     )
@@ -122,7 +129,9 @@ async def process_refund(refund: Refund) -> tuple[Refund, bool]:
 
 
 async def create_refund(merchant_id: str, payment_id: str, data: NewRefund) -> tuple[Refund, bool]:
-    return await process_refund(await reserve_refund(merchant_id, payment_id, data))
+    async with SessionLocal.begin() as session:
+        refund = await reserve_refund(session, merchant_id, payment_id, data)
+    return await process_refund(refund)
 
 
 async def finalize_refund(refund_id: str, result: RefundResult) -> bool:

@@ -70,12 +70,10 @@ def payment_method_of(token: str) -> str:
     raise ValidationFailed("payment_method", "unknown payment method")
 
 
-async def insert_payment(
-    session: AsyncSession, merchant: MerchantRef, data: NewPayment, payment_id: str | None = None
-) -> Payment:
+async def insert_payment(session: AsyncSession, merchant: MerchantRef, data: NewPayment) -> Payment:
     """Creates the payment row in `processing`. The bank is not called yet."""
     payment = Payment(
-        id=payment_id or new_id("pay"),
+        id=new_id("pay"),
         merchant_id=merchant.id,
         amount_minor=parse_amount(data.amount),
         currency=data.currency,
@@ -100,7 +98,10 @@ async def load_payment(payment_id: str) -> Payment:
 
 async def process_payment(payment: Payment) -> tuple[Payment, bool]:
     """Asks the bank to charge, using the payment ID as the bank reference, and records
-    the answer. Returns (payment, final); final is False when the outcome isn't known yet."""
+    the answer. Returns (payment, final); final is False when the outcome isn't known yet.
+    Calling it again is safe: the bank recognises the reference and won't charge twice."""
+    if payment.status != PaymentStatus.PROCESSING:
+        return payment, True  # already finished (a retry resuming after a crash)
     outcome = await simbank.charge(
         reference=payment.id,
         amount_minor=payment.amount_minor,
