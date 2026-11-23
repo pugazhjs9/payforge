@@ -23,12 +23,14 @@ class AppError(Exception):
         code: str,
         message: str,
         details: list[dict[str, str]] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.details = details
+        self.headers = headers  # e.g. Retry-After on 409 / 429 / 503
 
 
 class ValidationFailed(AppError):
@@ -60,8 +62,8 @@ class Forbidden(AppError):
 class Conflict(AppError):
     """The request is valid but clashes with the current state of the resource."""
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(409, code, message)
+    def __init__(self, code: str, message: str, headers: dict[str, str] | None = None) -> None:
+        super().__init__(409, code, message, headers=headers)
 
 
 class OAuthError(AppError):
@@ -99,6 +101,7 @@ async def _app_error(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(
         error_payload(_request_id(request), exc.code, exc.message, exc.details),
         status_code=exc.status,
+        headers=exc.headers,
     )
 
 
