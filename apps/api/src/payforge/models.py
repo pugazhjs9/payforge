@@ -8,8 +8,17 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, CheckConstraint, Enum, ForeignKey, Integer, String
-from sqlalchemy.dialects.mysql import DATETIME
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    Enum,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+)
+from sqlalchemy.dialects.mysql import DATETIME, VARCHAR
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -62,6 +71,11 @@ class RefundStatus(StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class IdempotencyStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
 
 
 class UserRole(StrEnum):
@@ -186,3 +200,26 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class IdempotencyKey(Base):
+    """One Idempotency-Key a merchant sent: which request it was for, the resource it
+    created, and the response to replay when the same request is retried."""
+
+    __tablename__ = "idempotency_keys"
+
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), primary_key=True)
+    key: Mapped[str] = mapped_column(
+        "idempotency_key", VARCHAR(255, charset="ascii", collation="ascii_bin"), primary_key=True
+    )
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[IdempotencyStatus] = mapped_column(
+        str_enum(IdempotencyStatus, "idempotency_status"), default=IdempotencyStatus.IN_PROGRESS
+    )
+    resource_id: Mapped[str | None] = mapped_column(String(40))
+    response_status: Mapped[int | None] = mapped_column(SmallInteger)
+    response_body: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    lock_token: Mapped[str | None] = mapped_column(String(32))
+    locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
