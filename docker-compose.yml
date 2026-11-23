@@ -42,5 +42,17 @@ services:
       timeout: 5s
       retries: 30
 
+  s3:
+    # SeaweedFS: an S3-compatible object store, standing in for AWS S3
+    image: chrislusf/seaweedfs:4.54
+    command: ["server", "-s3", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: payforge # LOCAL DEVELOPMENT ONLY
+      AWS_SECRET_ACCESS_KEY: payforge-secret
+    ports: ["8333:8333"]
+    volumes:
+      - s3data:/data
+
 volumes:
   mysqldata:
+  s3data:

@@ -11,7 +11,7 @@ import pytest
 from aio_pika.abc import AbstractChannel, AbstractRobustConnection
 from sqlalchemy import text
 
-from payforge import messaging
+from payforge import messaging, storage
 from payforge.auth.tokens import issue_access_token
 from payforge.db import engine
 from payforge.redis import redis
@@ -108,6 +108,12 @@ async def channel(amqp: AbstractRobustConnection) -> AsyncIterator[AbstractChann
         await (await ch.get_queue(name)).purge()
     yield ch
     await ch.close()
+
+
+@pytest.fixture(scope="session")
+async def s3() -> None:
+    """The test bucket on the local S3 server (SeaweedFS)."""
+    await storage.ensure_bucket()
 
 
 @pytest.fixture(scope="session")

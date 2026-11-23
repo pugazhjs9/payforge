@@ -48,4 +48,9 @@ jobs:
       - run: uv run mypy apps/api/src apps/simbank/src
       # binary logging is on by default; allow the app user to create the ledger triggers
       - run: mysql -h 127.0.0.1 -P 3307 -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1"
+      # SeaweedFS (S3 API) needs a start command, which service containers can't take
+      - run: |
+          docker run -d -p 8333:8333 -e AWS_ACCESS_KEY_ID=payforge \
+            -e AWS_SECRET_ACCESS_KEY=payforge-secret chrislusf/seaweedfs:4.54 server -s3 -dir=/data
+          timeout 60 sh -c 'until curl -s -o /dev/null http://127.0.0.1:8333; do sleep 1; done'
       - run: uv run pytest

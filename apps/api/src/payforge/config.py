@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # LOCAL DEVELOPMENT ONLY: allow http:// and localhost/private-network webhook URLs
     allow_insecure_webhooks: bool = False
 
+    # object storage (S3 API): SeaweedFS locally, AWS S3 in production
+    s3_endpoint_url: str = "http://127.0.0.1:8333"  # empty = AWS
+    s3_bucket: str = "payforge"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "us-east-1"
+
     # rate limits
     rate_limit_per_second: float = Field(default=25.0, gt=0)  # per merchant, on /v1
     rate_limit_burst: int = Field(default=100, ge=1)
