@@ -36,6 +36,24 @@
     </form>
     <div id="secret"></div>
   </div>
+
+  <div class="card">
+    <h2>Webhooks</h2>
+    <p class="muted">PayForge POSTs events to these URLs, signed in the <code>PayForge-Signature</code> header.
+      Failed deliveries are retried for about 7 hours.</p>
+    <table>
+      <thead><tr><th>URL</th><th>Events</th><th></th></tr></thead>
+      <tbody id="endpoints"></tbody>
+    </table>
+    <form id="add-endpoint">
+      <label for="url">Endpoint URL</label>
+      <input id="url" type="url" required maxlength="500" placeholder="https://shop.example/webhooks">
+      <button type="submit">Add endpoint</button>
+      <div class="error" id="endpoint-error"></div>
+    </form>
+    <div id="endpoint-secret"></div>
+    <div id="deliveries"></div>
+  </div>
 </main>
 <script src="app.js"></script>
 <script>
@@ -79,6 +97,62 @@
     }
   };
 
+  async function refreshEndpoints() {
+    const { data } = await api("GET", "/dashboard/webhook-endpoints");
+    $("endpoints").replaceChildren(
+      ...data.map((hook) =>
+        el("tr", {},
+          el("td", {}, el("code", {}, hook.url)),
+          el("td", {}, hook.event_types.join(", ")),
+          el("td", {},
+            el("button", { class: "secondary", onclick: () => showDeliveries(hook) }, "Deliveries"),
+            " ",
+            el("button", { class: "danger", onclick: async () => {
+              await api("DELETE", `/dashboard/webhook-endpoints/${hook.id}`);
+              $("deliveries").replaceChildren();
+              refreshEndpoints();
+            } }, "Delete")),
+        ),
+      ),
+    );
+  }
+
+  async function showDeliveries(hook) {
+    const { data } = await api("GET", `/dashboard/webhook-endpoints/${hook.id}/deliveries`);
+    const rows = data.map((d) =>
+      el("tr", {},
+        el("td", {}, d.event_type, el("br"), el("code", {}, d.event_id)),
+        el("td", {}, `${d.status} (${d.attempts} attempt${d.attempts === 1 ? "" : "s"})`),
+        el("td", {}, d.last_status_code ? `HTTP ${d.last_status_code}` : (d.last_error ?? "")),
+        el("td", {}, d.status === "pending" ? "" : el("button", { class: "secondary", onclick: async () => {
+          await api("POST", `/dashboard/webhook-deliveries/${d.id}/resend`);
+          showDeliveries(hook);
+        } }, "Resend")),
+      ));
+    $("deliveries").replaceChildren(
+      el("h3", {}, "Recent deliveries to ", el("code", {}, hook.url)),
+      rows.length
+        ? el("table", {}, el("tbody", {}, ...rows))
+        : el("p", { class: "muted" }, "Nothing sent yet."),
+    );
+  }
+
+  $("add-endpoint").onsubmit = async (event) => {
+    event.preventDefault();
+    $("endpoint-error").textContent = "";
+    try {
+      const hook = await api("POST", "/dashboard/webhook-endpoints", { url: $("url").value });
+      $("endpoint-secret").replaceChildren(
+        el("div", { class: "secret" },
+          el("strong", {}, "Signing secret (shown once): "), el("code", {}, hook.secret)),
+      );
+      $("url").value = "";
+      refreshEndpoints();
+    } catch (err) {
+      $("endpoint-error").textContent = err.message;
+    }
+  };
+
   $("logout").onclick = async () => {
     await api("POST", "/auth/logout");
     location.href = "/app/login.html";
@@ -88,7 +162,7 @@
     .then((me) => {
       $("merchant").textContent = me.merchant.name;
       $("user").textContent = `${me.user.email} · ${me.user.role}`;
-      return refreshKeys();
+      return Promise.all([refreshKeys(), refreshEndpoints()]);
     })
     .catch((err) => {
       if (err.status === 401) location.href = "/app/login.html";
