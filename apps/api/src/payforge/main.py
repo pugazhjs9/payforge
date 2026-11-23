@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from payforge import storage
 from payforge.api import auth, bank_webhooks, dashboard, github, health, oauth
 from payforge.api.v1.router import router as v1_router
 from payforge.clients import simbank
@@ -28,6 +29,7 @@ A multi-merchant payment gateway API (simulated bank, no real money).
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    await storage.ensure_bucket_outside_production()
     yield
     # graceful shutdown: close outgoing connections and the database pool
     await simbank.close()

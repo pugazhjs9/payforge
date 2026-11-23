@@ -20,7 +20,7 @@ import asyncio
 import signal
 from collections.abc import Awaitable, Callable
 
-from payforge import messaging
+from payforge import messaging, storage
 from payforge.clients import simbank
 from payforge.config import settings
 from payforge.db import engine
@@ -61,6 +61,7 @@ async def reconcile_all() -> int:
 
 
 async def run(stop: asyncio.Event) -> None:
+    await storage.ensure_bucket_outside_production()
     connection = await messaging.connect()
     try:
         # publishing and consuming on separate channels: a slow consumer can't hold up

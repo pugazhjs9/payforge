@@ -24,6 +24,7 @@ from botocore.exceptions import ClientError
 from mypy_boto3_s3 import S3Client
 
 from payforge.config import settings
+from payforge.logging import log
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,17 @@ async def ensure_bucket() -> None:
         )
 
     await asyncio.to_thread(run)
+
+
+async def ensure_bucket_outside_production() -> None:
+    """Local development convenience. In production the bucket (and its CORS rules)
+    belongs to the infrastructure code, not to the app."""
+    if settings.environment == "production":
+        return
+    try:
+        await ensure_bucket()
+    except Exception:  # S3 down: the app still starts; uploads fail until it's back
+        log.exception("s3_bucket_setup_failed")
 
 
 async def upload_file(key: str, file: IO[bytes], content_type: str) -> None:
